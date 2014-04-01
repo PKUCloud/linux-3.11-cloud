@@ -33,6 +33,13 @@
 
 #include <asm/kvm_host.h>
 
+// kvm rr
+#include <asm/kvm_rr.h>
+#include <asm/atomic.h>
+
+// end kvm_rr
+
+
 #ifndef KVM_MMIO_SIZE
 #define KVM_MMIO_SIZE 8
 #endif
@@ -251,8 +258,8 @@ struct kvm_vcpu {
 	int mmio_read_completed;
 	int mmio_is_write;
 	int mmio_cur_fragment;
-	int mmio_nr_fragments;
-	struct kvm_mmio_fragment mmio_fragments[KVM_MAX_MMIO_FRAGMENTS];
+	int mmio_nr_fragments;	//=nember of fragments?
+	struct kvm_mmio_fragment mmio_fragments[KVM_MAX_MMIO_FRAGMENTS];	// 2 mmio fragments at most
 #endif
 
 #ifdef CONFIG_KVM_ASYNC_PF
@@ -294,6 +301,54 @@ struct kvm_vcpu {
 	gfn_t access_size;
 	gfn_t dirty_size;
 	gfn_t conflict_size;
+
+	// kvm rr
+	// Field that will flag the recording
+	// state of an vcpu
+
+	//edit by rsr 
+	u8 output_counting;
+	//rsr end
+	
+	u8 is_replaying;
+	// recoding time stamps
+	struct kvm_rr_ts rr_ts;
+	//struct file *log_file;
+	//char *log_buf;
+	//u64 log_offset;
+	//u16 log_rec_len;
+	//u32 prev_log_data_offset;
+
+	struct kvm_rr_ts stop_at_ts;
+	// 1 - exit on PMI
+	// 2 - single step to right branch
+	// 3 - debug exception 
+	// 4 - single step to right ecx 
+	//u8 replay_mode;
+	//u32 preset_br_count;
+
+	// record the interrupt here..
+	// only when successfully injected
+	// record it in log file
+	struct kvm_rr_ext_int int_log;
+	// this will be used to reject an intr
+	// incase of exception during delivery
+	//u8 reinject;
+
+	//u8 can_inject;
+	//u8 next_rec_type;
+	u8 is_next_rec_intr;
+	u64 num_recs;
+	u32 exit_reason;
+	// one common wait queue	
+	wait_queue_head_t irq_wait;
+	atomic_t irq_counts[KVM_NR_INTERRUPTS]; 
+	// for network pkts recording
+	struct kvm_rr_pkts *pending_reqs;
+	// take this lock before altering
+	// the list of pending_reqs
+	spinlock_t pending_reqs_lock;	 
+	// end kvm rr
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)
