@@ -2342,9 +2342,34 @@ static long kvm_vm_ioctl(struct file *filp,
 	if (kvm->mm != current->mm)
 		return -EIO;
 	switch (ioctl) {
-	case KVM_CREATE_VCPU:
+	case KVM_CREATE_VCPU:{ 		//this brace should be added here!!!
 		r = kvm_vm_ioctl_create_vcpu(kvm, arg);
+
+		//edit by rsr, just for debuging. Should be deleted later. !!!!!!!!!!!!
+
+		struct kvm_vcpu *rr_v;
+		int r_flag = -ENOTTY;
+		kvm_for_each_vcpu(r_flag,rr_v,kvm)
+		{
+			// check if already enabled , if yes
+			// return EEXIST
+			if(rr_v->is_recording || rr_v->is_replaying)
+			{
+				r_flag = -EEXIST;
+				printk( "<1>""init flag is_replaying failed !!!\n " );
+				break;
+			}
+			rr_v->is_recording = 1;
+			// acts as flag to write log record 
+			//rr_v->log_offset = -1;
+			rr_v->rr_ts.br_count = 0;
+			rr_v->output_counting = 0;	
+		
+		}
+		//rsr end
+		
 		break;
+	}
 	case KVM_SET_USER_MEMORY_REGION: {
 		struct kvm_userspace_memory_region kvm_userspace_mem;
 
@@ -2357,6 +2382,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_GET_DIRTY_LOG: {
+	
 		struct kvm_dirty_log log;
 
 		r = -EFAULT;
@@ -2367,6 +2393,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	}
 #ifdef KVM_COALESCED_MMIO_PAGE_OFFSET
 	case KVM_REGISTER_COALESCED_MMIO: {
+		
 		struct kvm_coalesced_mmio_zone zone;
 		r = -EFAULT;
 		if (copy_from_user(&zone, argp, sizeof zone))
@@ -2375,6 +2402,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_UNREGISTER_COALESCED_MMIO: {
+	
 		struct kvm_coalesced_mmio_zone zone;
 		r = -EFAULT;
 		if (copy_from_user(&zone, argp, sizeof zone))
@@ -2384,6 +2412,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	}
 #endif
 	case KVM_IRQFD: {
+		
 		struct kvm_irqfd data;
 
 		r = -EFAULT;
@@ -2393,6 +2422,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_IOEVENTFD: {
+		
 		struct kvm_ioeventfd data;
 
 		r = -EFAULT;
@@ -2403,6 +2433,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	}
 #ifdef CONFIG_KVM_APIC_ARCHITECTURE
 	case KVM_SET_BOOT_CPU_ID:
+
 		r = 0;
 		mutex_lock(&kvm->lock);
 		if (atomic_read(&kvm->online_vcpus) != 0)
@@ -2414,6 +2445,7 @@ static long kvm_vm_ioctl(struct file *filp,
 #endif
 #ifdef CONFIG_HAVE_KVM_MSI
 	case KVM_SIGNAL_MSI: {
+	
 		struct kvm_msi msi;
 
 		r = -EFAULT;
@@ -2426,6 +2458,7 @@ static long kvm_vm_ioctl(struct file *filp,
 #ifdef __KVM_HAVE_IRQ_LINE
 	case KVM_IRQ_LINE_STATUS:
 	case KVM_IRQ_LINE: {
+		
 		struct kvm_irq_level irq_event;
 
 		r = -EFAULT;
@@ -2449,6 +2482,7 @@ static long kvm_vm_ioctl(struct file *filp,
 #endif
 #ifdef CONFIG_HAVE_KVM_IRQ_ROUTING
 	case KVM_SET_GSI_ROUTING: {
+	
 		struct kvm_irq_routing routing;
 		struct kvm_irq_routing __user *urouting;
 		struct kvm_irq_routing_entry *entries;
@@ -2478,6 +2512,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	}
 #endif /* CONFIG_HAVE_KVM_IRQ_ROUTING */
 	case KVM_CREATE_DEVICE: {
+		
 		struct kvm_create_device cd;
 
 		r = -EFAULT;
@@ -2497,8 +2532,10 @@ static long kvm_vm_ioctl(struct file *filp,
 	}
 	default:
 		r = kvm_arch_vm_ioctl(filp, ioctl, arg);
+
 		if (r == -ENOTTY)
 			r = kvm_vm_ioctl_assigned_device(kvm, ioctl, arg);
+
 	}
 out:
 	return r;
@@ -2524,6 +2561,8 @@ static long kvm_vm_compat_ioctl(struct file *filp,
 		return -EIO;
 	switch (ioctl) {
 	case KVM_GET_DIRTY_LOG: {
+		printk( "<0>""13\n" );
+		
 		struct compat_kvm_dirty_log compat_log;
 		struct kvm_dirty_log log;
 
@@ -2605,6 +2644,7 @@ static int kvm_dev_ioctl_create_vm(unsigned long type)
 	}
 #endif
 	r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR);
+
 	if (r < 0)
 		kvm_put_kvm(kvm);
 

@@ -18,6 +18,18 @@
 
 #include "irq.h"
 #include "mmu.h"
+
+// kvm rr
+#include <asm/kvm_rr.h>
+#include <asm/msr.h>
+#include <asm/apic.h>
+#include <asm/apicdef.h>
+#include <asm/atomic.h>
+#include <linux/delay.h>
+#include <linux/wait.h>
+static int injected_ss; 
+// end kvm rr
+
 #include "cpuid.h"
 #include "logger.h"
 
@@ -464,6 +476,14 @@ struct vcpu_vmx {
 	u32 exit_reason;
 
 	bool rdtscp_enabled;
+
+	// kvm rr
+	// this is where msr used for record
+	// and replay shall be saved.
+	
+	struct msr_autosave_rr msr_autosave_rr;
+	bool msr_autosave_rr_initialized;
+	// end kvm rr 	
 
 	/* Posted interrupt descriptor */
 	struct pi_desc pi_desc;
@@ -4324,11 +4344,34 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 	vmcs_writel(HOST_GS_BASE, 0); /* 22.2.4 */
 #endif
 
+	// kvm rr 
+	/* old code
+
 	vmcs_write32(VM_EXIT_MSR_STORE_COUNT, 0);
 	vmcs_write32(VM_EXIT_MSR_LOAD_COUNT, 0);
 	vmcs_write64(VM_EXIT_MSR_LOAD_ADDR, __pa(vmx->msr_autoload.host));
 	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, 0);
 	vmcs_write64(VM_ENTRY_MSR_LOAD_ADDR, __pa(vmx->msr_autoload.guest));
+	*/
+	
+	// now we will add msrs as specified in kvm.h
+
+	init_kvm_rr_msr(&(vmx->msr_autosave_rr));
+	//When VM exit, cpu will store the pmu counters into the address which we config below.
+	vmcs_write32(VM_EXIT_MSR_STORE_COUNT,KVM_RR_NR_MSRS);
+	vmcs_write64(VM_EXIT_MSR_STORE_ADDR,\
+				__pa(vmx->msr_autosave_rr.exit_store_guest));
+
+	vmcs_write32(VM_EXIT_MSR_LOAD_COUNT,KVM_RR_NR_MSRS);
+	vmcs_write64(VM_EXIT_MSR_LOAD_ADDR,\
+				__pa(vmx->msr_autosave_rr.exit_load_host));
+
+	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT,KVM_RR_NR_MSRS);
+	vmcs_write64(VM_ENTRY_MSR_LOAD_ADDR,\
+				__pa(vmx->msr_autosave_rr.entry_load_guest));
+
+	
+	// end kvm rr
 
 	if (vmcs_config.vmentry_ctrl & VM_ENTRY_LOAD_IA32_PAT) {
 		u32 msr_low, msr_high;
@@ -4866,6 +4909,101 @@ static int handle_triple_fault(struct kvm_vcpu *vcpu)
 	vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 	return 0;
 }
+
+// kvm rr
+static int handle_mtf(struct kvm_vcpu *vcpu)
+{	
+	return 1;
+}
+
+//use to record all results of RDTSC instruction
+static int handle_rdtsc(struct kvm_vcpu *vcpu)
+{
+	// offset adding has to be handled
+	// later
+
+	struct kvm_rr_rdtsc rdtsc_rr_log;	
+	u32 rax,rdx;
+	skip_emulated_instruction(vcpu);
+	// rdtsc will  return value in RDX:RAX
+	// we will use already available offset adjusted
+	// tsc for guest
+	// exit on rdtsc is static config, allow this even
+	// when it is not recording 
+	if(!vcpu->is_replaying)
+	{
+		rdtsc_rr_log.tsc = guest_read_tsc();
+		
+		rdx = rdtsc_rr_log.tsc >> 32;
+		rax = rdtsc_rr_log.tsc & 0xFFFFFFFF; 
+	
+		//asm volatile("rdtsc" : "=a" (rax), "=d" (rdx));
+		//after this rdx:rax will have TSC 
+		//value
+		// update this value into VCPU 
+		kvm_register_write(vcpu,VCPU_REGS_RAX,rax);
+		kvm_register_write(vcpu,VCPU_REGS_RDX,rdx);
+		
+		rdtsc_rr_log.rec_type = KVM_RR_RDTSC;
+		write_log(KVM_RR_RDTSC, vcpu, sizeof(struct kvm_rr_rdtsc), &rdtsc_rr_log);
+		// reset counter to zero .. next event is relative 
+		// from here
+		vcpu->rr_ts.br_count = 0;
+		// record pending pkts, deal with it later
+		// kvm_rr_rec_reqs(vcpu); 
+
+	}
+	/*
+	else if(vcpu->is_replaying)
+	{
+		struct kvm_rr_rdtsc *rdtsc_rr_log = NULL;
+		int ret;
+		ret = read_log(vcpu);
+		if(ret <= 0 || ret != KVM_RR_RDTSC)
+		{
+			kvm_err("is out of sync %d expecting KVM_RR_RDTSC,\
+				got %d \n", ret != KVM_RR_RDTSC,ret);
+			// undefined behavior, or out of sync
+			vcpu_disable_rply(vcpu); 
+		}
+		else
+		{
+			rdtsc_rr_log = get_log_data_ptr(vcpu);
+		}
+		if(!rdtsc_rr_log)
+		{
+			// undefined behavior
+			kvm_err("couldn't get data ptr\n"); 
+			vcpu_disable_rply(vcpu);
+		}
+		else
+		{
+
+			vcpu->next_rec_type = rdtsc_rr_log->next_rec_type;
+			
+			rdx = rdtsc_rr_log->tsc >> 32;
+			rax = rdtsc_rr_log->tsc & 0xFFFFFFFF; 
+	
+			//asm volatile("rdtsc" : "=a" (rax), "=d" (rdx));
+			//after this rdx:rax will have TSC 
+			//value
+			// update this value into VCPU 
+			kvm_register_write(vcpu,VCPU_REGS_RAX,rax);
+			kvm_register_write(vcpu,VCPU_REGS_RDX,rdx);
+
+			// log record
+			kvm_debug_log("RPLY_TSC: %lu:%llu,%llx,%llx:%llx\n",\
+				vcpu->num_recs,vcpu->rr_ts.br_count,  \
+				vcpu->rr_ts.rcx,vcpu->rr_ts.rip,rdtsc_rr_log->tsc);
+			vcpu->rr_ts.br_count = 0;
+			kvm_rr_rply_reqs(vcpu);
+		}
+	}
+	*/
+	return 1;
+}
+
+// end kvm rr
 
 static int handle_io(struct kvm_vcpu *vcpu)
 {
@@ -6622,6 +6760,13 @@ static int (*const kvm_vmx_exit_handlers[])(struct kvm_vcpu *vcpu) = {
 	[EXIT_REASON_HLT]                     = handle_halt,
 	[EXIT_REASON_INVD]		      = handle_invd,
 	[EXIT_REASON_INVLPG]		      = handle_invlpg,
+
+	// kvm rr
+	[EXIT_REASON_RDTSC] 			  = handle_rdtsc,
+	//[EXIT_REASON_MTF]			  		= handle_mtf,		//uncomment later!!!!
+	// end kvm rr
+
+	
 	[EXIT_REASON_RDPMC]                   = handle_rdpmc,
 	[EXIT_REASON_VMCALL]                  = handle_vmcall,
 	[EXIT_REASON_VMCLEAR]	              = handle_vmclear,
@@ -7306,6 +7451,66 @@ static void vmx_cancel_injection(struct kvm_vcpu *vcpu)
 	vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, 0);
 }
 
+
+// kvm rr
+int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
+{
+	u32 intr = 0 ;
+	struct kvm_rr_ext_int *int_log = &vcpu->int_log;
+	if(vcpu->is_recording)
+	{
+		intr = vmcs_read32(VM_ENTRY_INTR_INFO_FIELD);
+		if((intr & INTR_INFO_VALID_MASK) && \
+			((intr & INTR_INFO_INTR_TYPE_MASK) == INTR_TYPE_EXT_INTR))
+		{
+			int_log->int_vec = intr & INTR_INFO_VECTOR_MASK;
+			int_log->is_realmode = 0;
+			int_log->irq_count = atomic_read(&vcpu->irq_counts[int_log->int_vec]);
+
+			// we can't predict the next br, so give it enough space
+			// which will be updated later in user space before replay
+			// BUG don't use instruction pointer of VM Exit
+			// some one could have emulated an instruction thus changing the IP
+			u64 rip;
+			rip = kvm_rip_read(vcpu);
+			vcpu->rr_ts.rip = rip;
+			
+			// we can't use ecx at exit as a reference, because last may differ
+			// between successful injection during recording and replaying
+			// so we use the rcx present before injection
+			vcpu->rr_ts.rcx = kvm_register_read(vcpu, VCPU_REGS_RCX);
+
+		}
+		else
+		{
+			// no valid intr to record
+			int_log->int_vec = 0;
+		}
+	} // end of recording
+	/*
+	else if(vcpu->is_replaying)
+	{
+		// only when enternal interrupt (hard)
+		intr = vcpu->arch.interrupt.nr | INTR_INFO_VALID_MASK | INTR_TYPE_EXT_INTR;
+		kvm_debug_log("RPLY_INT: %lu:%llu,%llx,%llx:%u\n",\
+                        vcpu->num_recs,vcpu->rr_ts.br_count,  \
+                        vcpu->rr_ts.rcx,vcpu->rr_ts.rip,vcpu->arch.interrupt.nr);
+
+		vcpu->rr_ts.br_count = 0;
+		// when interrupt is injected multiple time,
+		// the reqs will also be copied multiple times
+		// but it is fine.	
+		kvm_rr_rply_reqs(vcpu);
+
+		vmcs_write32(VM_ENTRY_INTR_INFO_FIELD, intr);
+		//vmx_clear_hlt(vcpu);	//we don't need it any more.
+	}
+	*/
+	
+}
+
+// end kvm rr
+
 static void atomic_switch_perf_msrs(struct vcpu_vmx *vmx)
 {
 	int i, nr_msrs;
@@ -7355,6 +7560,72 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	 * case. */
 	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)
 		vmx_set_interrupt_shadow(vcpu, 0);
+
+	// kvm rr
+	//
+	// preempt is already disable by the caller, so 
+	// good to go
+	
+	// configA_msr_rr_state is called only once when 
+	// intialization of register values are required.
+
+	if(!vmx->msr_autosave_rr_initialized && \
+			(vcpu->is_replaying || vcpu->is_recording))
+	{
+		vmx->msr_autosave_rr_initialized = 1;
+		config_msr_rr_state(&vmx->msr_autosave_rr);
+		
+		// config vmcs for rdtsc to generate a vm exit
+		u32 cpu_based_vm_exec_ctl = vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
+		cpu_based_vm_exec_ctl |= CPU_BASED_RDTSC_EXITING;
+		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL, cpu_based_vm_exec_ctl);
+
+	}
+	save_host_msr_rr_state(&vmx->msr_autosave_rr);
+	copy_guest_store_to_load(&vmx->msr_autosave_rr);
+
+	// doesn't work in core 2 duo !
+	// disable branch counting on SMM mode 
+	u64 guest_dbgctl;
+	guest_dbgctl = vmcs_read64(GUEST_IA32_DEBUGCTL);
+	guest_dbgctl |= (1 << 14);
+	vmcs_write64(GUEST_IA32_DEBUGCTL, guest_dbgctl);
+
+	u64 host_dbgctl;
+	rdmsrl(MSR_IA32_DEBUGCTLMSR, host_dbgctl);
+	host_dbgctl |= (1 << 14);
+	wrmsrl(MSR_IA32_DEBUGCTLMSR, host_dbgctl);
+
+	if(vcpu->is_recording)
+	{
+		// disable all counters and reset the counter 2 
+		// to zero at host. 
+		wrmsrl(rr_msr_map[KVM_RR_IA32_PERF_GLOBAL_CTRL_IDX],(u64)0);
+		wrmsrl(rr_msr_map[KVM_RR_IA32_PMC1_IDX], (u64)0);
+		kvm_rr_irq_handle(vcpu);	
+	}
+
+/*
+	//edit by rsr
+	printk( "----" );
+	char rsr[256];
+	int i ;
+	for( i = 0 ; i < KVM_MAX_MMIO_FRAGMENTS; i++ ){
+		if( vcpu->mmio_fragments[i].len == 0 )
+			continue;
+		memset( rsr , 0 , 256 );
+		memcpy( rsr , vcpu->mmio_fragments[i].data , vcpu->mmio_fragments[i].len);
+		rsr[vcpu->mmio_fragments[i].len] = 0;
+		
+		printk( "F%d | data: %s | addr: 0x%llx | len = %d | cur_frg:%d | num_frag:%d \n" \
+				, i , rsr , vcpu->mmio_fragments[i].gpa , vcpu->mmio_fragments[i].len \
+				, vcpu->mmio_cur_fragment , vcpu->mmio_nr_fragments );
+	}
+	//end rsr
+*/
+	// To be continue... There are a lot of things which should be done here !!!!!~~~~~~~~~~~
+
+		
 
 	atomic_switch_perf_msrs(vmx);
 	debugctlmsr = get_debugctlmsr();
@@ -7491,6 +7762,56 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	loadsegment(ds, __USER_DS);
 	loadsegment(es, __USER_DS);
 #endif
+
+	// kvm rr
+	// We should record the interrupt after VM exit. Because interrupt injection may not 
+	// be successful at the first time. So we log the interrupt before VM entry, then we 
+	// check if this interrupt was injected success after VM exit.
+
+	// record the time stamp into kvm_vcpu 
+	// is this place safe ??? yes. this code must be executed before 
+	// touched rip of the guest.
+	//
+	// BUG kvm_register_read(vcpu, VCPU_REGS_RIP);	
+
+	//int_i = vmcs_read32(VM_ENTRY_INTR_INFO_FIELD);
+	//kvm_debug("v %d t %d v %d %x\n",int_i & 0xff, (int_i >> 8) & 0x7, (int_i >> 31) &1 ,vmcs_read32(GUEST_INTERRUPTIBILITY_INFO));
+
+
+	// DONOT DELETE 
+	//check if this interrupt was injected success?
+	vmx->idt_vectoring_info = vmcs_read32(IDT_VECTORING_INFO_FIELD);
+
+	if(vcpu->is_recording && vcpu->int_log.int_vec && !vmx->idt_vectoring_info) 
+	{
+		// this will have the old branch count and stats before
+		// vm entry.. so it is OK
+		// NOTE --- real mode interrupts are delivered through software
+		// .. so vm exit while delivery isn't possible 
+
+		vcpu->int_log.rec_type = KVM_RR_EXT_INT;
+
+		write_log(KVM_RR_EXT_INT,vcpu,sizeof(struct kvm_rr_ext_int),&vcpu->int_log);
+		// reset counter to zero .. next event is relative 
+		// from here
+		vcpu->rr_ts.br_count = 0;
+		// record pending pkts, deal with it later
+		//kvm_rr_rec_reqs(vcpu);
+
+
+	}
+
+	//fill the tuple<rip, rcx, bc>
+	vcpu->rr_ts.rip = vmcs_readl(GUEST_RIP);
+	vcpu->rr_ts.rcx = vcpu->arch.regs[VCPU_REGS_RCX]; 
+	u64 curr_br_count = read_pmc1();
+
+	if(vcpu->is_recording){
+		vcpu->rr_ts.br_count += curr_br_count;
+	}
+
+// end kvm rr
+
 
 	vcpu->arch.regs_avail = ~((1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP)
 				  | (1 << VCPU_EXREG_RFLAGS)

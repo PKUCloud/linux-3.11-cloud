@@ -46,7 +46,6 @@ int kvm_handle_mmio_return(struct kvm_vcpu *vcpu, struct kvm_run *run)
 			return -EINVAL;
 
 		memcpy(dest, run->mmio.data, len);
-
 		trace_kvm_mmio(KVM_TRACE_MMIO_READ, len, run->mmio.phys_addr,
 				*((u64 *)run->mmio.data));
 
