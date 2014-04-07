@@ -11,20 +11,49 @@
 #define LOGGER_MAJOR 0  //dynamic major by default
 #define LOGGER_QUANTUM 4096   //use a quantum size of 4096
 #define PRINT_TIME 1      //1 - to print timestamp at the front of every message
+#define MAX_VCPU 256
 
 struct logger_quantum {
-	void *data;            //pointer to a page
-	struct logger_quantum *next;     //next listitem
+	void *data;            /* pointer to a page */
+	int vcpu_id;             /* the vcpu_id of the owner of this quantum */
+	struct logger_quantum *next;     /* next listitem */
 };
 
+
+struct vcpu_quantum {
+	char *str;	/* the start of the free space in current page */
+	char *end;	/* the end of the free space in current page */
+	int vcpu_id;	/* the vcpu_id of this struct */
+
+	/* when in record mode, there is only one logger_quantum in a vcpu_quantum
+	* when a page is full, we move it to the global out_list and allocate another page
+	* when in replay mode, maybe we will maintain a separate list of logger_quantum
+	* for each vcpu_quantum
+	*/
+	struct logger_quantum *head;	/* the head of the quantums of this vcpu */
+	struct logger_quantum *tail;	/* the tail of the quantums of this vcpu */
+};
+
+
 struct logger_dev {
-	struct logger_quantum *head;     //the head of the quantum list
-	struct logger_quantum *tail;      //the tail of the quantum list
+	/* logger_dev maintains a list of quantums to be swapped out to user-space
+	* these quantums are all ready and full of data
+	* we called this list "out_list"
+	*/
+	struct logger_quantum *head;	/* the head of the out_list */
+	struct logger_quantum *tail;	/* the tail of the out_list */
+	spinlock_t dev_lock;	/* the lock of the out_list */	
+
+	struct vcpu_quantum quantums[MAX_VCPU];	/*vcpu_quantums used to communicate with the kernel part */
+
+	/* these variables should be removed */
 	size_t size;               // total size of data in the device
 	char *str;         //the start of the free space in current page
 	char *end;          //the end of current page
+
+
 	int vmas;              //active mappings
-	spinlock_t dev_lock;
+	
 	int state; //the state of the dev memory
 	struct cdev cdev;
 	struct class *logger_class;
@@ -86,6 +115,7 @@ struct printf_spec {
 	s16	precision;	/* # of digits/chars */
 };
  
-int print_record(const char* fmt, ...);
+int print_record(const char *fmt, ...);
+int print_record_id(int vcpu_id, const char *fmt, ...);
 
 #endif
