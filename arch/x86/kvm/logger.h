@@ -14,9 +14,14 @@
 #define MAX_VCPU 256
 
 struct logger_quantum {
-	void *data;            /* pointer to a page */
-	int vcpu_id;             /* the vcpu_id of the owner of this quantum */
-	struct logger_quantum *next;     /* next listitem */
+	void *data;	/* pointer to a page */
+	int vcpu_id;	/* the vcpu_id of the owner of this quantum */
+
+	/*the valid data size of this quantum, usually equals to the logger_quantum
+	 *it is now valid only when it is in the global out_list, otherwise it is zero
+	 */
+	int quantum_size;
+	struct logger_quantum *next;	/* next listitem */
 };
 
 
@@ -45,20 +50,21 @@ struct logger_dev {
 	spinlock_t dev_lock;	/* the lock of the out_list */	
 
 	struct vcpu_quantum quantums[MAX_VCPU];	/*vcpu_quantums used to communicate with the kernel part */
-
-	/* these variables should be removed */
-	size_t size;               // total size of data in the device
-	char *str;         //the start of the free space in current page
-	char *end;          //the end of current page
-
-
 	int vmas;              //active mappings
-	
 	int state; //the state of the dev memory
 	struct cdev cdev;
 	struct class *logger_class;
 	wait_queue_head_t queue;   //queue to mmap  //maybe change to sem?
 	int print_time;         //if set, print timestamp at the front of every message
+};
+
+
+/* contains the info of a quantum
+ * only used to communicate with user-space
+ */
+struct quantum_info {
+	int vcpu_id;	/* the vcpu_id of the owner of this quantum */
+	int quantum_size;	/*the valid data size of this quantum */
 };
 
 #define ZEROPAD	1		/* pad with zero */

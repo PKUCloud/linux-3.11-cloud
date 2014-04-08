@@ -1,4 +1,4 @@
-#define DEBUG
+/* #define DEBUG */
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -36,6 +36,7 @@ struct kmem_cache *quantum_cache;   //for struct logger_quantum
 
 struct proc_dir_entry *entry;
 
+extern bool kvm_record;	/*if recording is running */
 // open function
 int logger_open(struct inode *inode, struct file *filp)
 {
@@ -55,90 +56,73 @@ int logger_release(struct inode *inode, struct file *filp)
 }
 
 
-//read function
+/* read function of the file_operations
+ * does not return data really
+ * just return struct quantum_info to the user-space to tell the info 
+ * about next quantum to read. Then the user-space will mmap() to read
+ * the quantum. This function will be blocked if the global out_list is
+ * empty.
+ */
 ssize_t logger_read(struct file *filp, char __user *buf, size_t count,
 	loff_t *f_pos)
 {
 	struct logger_dev *dev = filp->private_data;
-	int ret = count;
-	char tmp[logger_quantum];
+	/*despite what count is, ret is the size of quantum_info.
+	 * In the case of fread(), it will always set count to 4096 (buffer).
+	 */
+	int ret = sizeof(struct quantum_info);
+	struct quantum_info qinfo;
+	struct logger_quantum *ptr;
 
 	spin_lock(&dev->dev_lock);
-	if(likely(dev->size >= logger_quantum)) {
-		//there are more than one page data
-		//tell the program to use mmap to transfer data
-		*f_pos += count;
-		goto out;
-	}else {
-
-		if(likely(dev->state == NORMAL)) {
-			if(unlikely(filp->f_flags & O_NONBLOCK)) {
-				ret = -EAGAIN;
-				goto out;
-			}
-			while(dev->size < logger_quantum) {
-				if(unlikely(dev->state == FLUSHED)) {
-					//return remaining data to user directly
-					goto flushed;
+	while(1) {
+		if(likely(dev->head)) {
+			/* the global out_list is not empty
+			 * so there are quantums to be transfered
+			 */
+			 ptr = dev->head;
+			 qinfo.vcpu_id = ptr->vcpu_id;
+			 qinfo.quantum_size = ptr->quantum_size;
+			 goto out;
+		} else {
+			/* the global out_list is empty now
+			 * either to wait for data or wait for a flush command
+			 */
+			if(unlikely(dev->state == FLUSHED)) {
+			 	/* now there is no data in the out_list and the state
+			 	 * is FLUSHED. It means the record is terminated.
+			 	 */
+			 	 ret = 0;
+			 	 dev->state = NORMAL;
+			 	 goto out;
+			} else {
+			 	if(unlikely(filp->f_flags & O_NONBLOCK)) {
+				 	ret = -EAGAIN;
+				 	goto out;
 				}
+				 /* block */
 				spin_unlock(&dev->dev_lock);
-
-				//maybe there is some question here with ioctl(flush)
-				//maybe need to flush twice
-				if(wait_event_interruptible(dev->queue, (dev->size >= logger_quantum || dev->state == FLUSHED)))
+				 /* sometimes maybe even after a flush, there is no data in out_list. In this situation
+				  * we need to wake up it, too.
+				  */
+				if(wait_event_interruptible(dev->queue, (dev->head != NULL || dev->state == FLUSHED)))
 					return -ERESTARTSYS;
-
 				spin_lock(&dev->dev_lock);
 			}
-			
-			//has more than one page data
-			goto out;
-
-		}else if(unlikely(dev->state == FLUSHED)) {
-			//return remaining data to user directly
-			goto flushed;
 		}
 	}
-	
-flushed:
-	//maybe some problems here
-	//spin_lock vs sleep
-	//flush all the data to user space
-	ret = dev->size;
-	if(ret == 0) {
-		dev->state = NORMAL;
-		goto out;    //EOF
-	}
-	memcpy(tmp, (char*)(dev->head->data), ret);
-	spin_unlock(&dev->dev_lock);
-
-	//though not holding the lock
-	//but the state is flushed, and no one else can add new data
-	//proc can read the data yet, but doesn't matter
-	if(copy_to_user(buf, tmp, ret)) {
-		return -EFAULT;
-	}
-	
-	spin_lock(&dev->dev_lock);
-	//data has been flushed out
-	//delete the last page
-	assert((dev->head == dev->tail));
-
-
-	if(likely(dev->size < logger_quantum)) {
-		kmem_cache_free(data_cache, dev->head->data);
-		kmem_cache_free(quantum_cache, dev->head);
-
-		dev->head = dev->tail = NULL;
-		dev->str = dev->end = NULL;
-		dev->size = 0;
-	}
-
-	*f_pos += ret;
 
 	
 out:
 	spin_unlock(&dev->dev_lock);
+	
+	if(likely(ret > 0)) {
+		/* transfer qinfo to user-space */
+		if(copy_to_user(buf, &qinfo, sizeof(qinfo))) {
+			return -EFAULT;
+		}
+		*f_pos += ret;	/* does the delta have to be the same as ret? */
+	}
 	return ret;
 }
 
@@ -162,23 +146,52 @@ long logger_ioctl(struct file *filp,
 	unsigned int cmd, unsigned long arg)
 {
 	int ret = 0;
+	int i, size;
 	struct logger_dev *dev = filp->private_data;
+	struct vcpu_quantum *vq;
+	struct logger_quantum *ptr;
 
 	if(_IOC_TYPE(cmd) != LOGGER_IOC_MAGIC) return -ENOTTY;
 
 	switch(cmd) {
-		case LOGGER_FLUSH:
-		//stop kernel to log into device
-		//flushed all the data out to userspace
-		//always it means the vm has stopped and flush all the log to userspace
-			spin_lock(&dev->dev_lock);
-			dev->state = FLUSHED;
-			wake_up_interruptible(&dev->queue);         //maybe there is some question here with read
-			spin_unlock(&dev->dev_lock);
-			break;
+	/* If recording is still running, just return immediately,
+	 * otherwise, moves all the vcpu_quantums's quantum to the out_list
+	 * and flush them out to user-space
+	 */
+	case LOGGER_FLUSH:
+		if(kvm_record)
+			return -EPERM;	/* operation not permitted */
+		spin_lock(&dev->dev_lock);
+		dev->state = FLUSHED;
+		for(i = 0; i < MAX_VCPU; ++i) {
+			vq = &dev->quantums[i];
+			if(vq->head) {
+				assert(vq->head == vq->tail && vq->vcpu_id == vq->head->vcpu_id);
+				size = vq->str - (char*)(vq->head->data);
+				if(size > 0) {
+					/* move it to the out_list */
+					ptr = vq->head;
+					assert(ptr->next == NULL);
+					vq->head = vq->tail = NULL;
+					vq->str = vq->end = NULL;
+					ptr->quantum_size = size;
+					if(logger_dev.head == NULL) {
+						logger_dev.head = ptr;
+						logger_dev.tail = ptr;
+					} else {
+						logger_dev.tail->next = ptr;
+						logger_dev.tail = ptr;
+					}
+					wake_up_interruptible(&dev->queue);
+				}
+			}
+		}
+		wake_up_interruptible(&dev->queue);
+		spin_unlock(&dev->dev_lock);
+		break;
 
-		default:
-			return -ENOTTY;
+	default:
+		return -ENOTTY;
 	}
 	return ret;
 }
@@ -218,6 +231,8 @@ static int logger_setup_cdev(struct logger_dev *dev)
 	}
 	device_create(dev->logger_class, NULL, devno, NULL, "logger");
 
+	return 0;
+
 fail_create_class:
 	cdev_del(&dev->cdev);
 out:
@@ -248,7 +263,7 @@ static void *logger_seq_start(struct seq_file *s, loff_t *pos)
 
 	if(i > 0 || !ptr)
 		return NULL;
-	else return ptr->data;
+	else return ptr;
 }
 
 
@@ -264,7 +279,7 @@ static void *logger_seq_next(struct seq_file *s, void *v, loff_t *pos)
 
 	if(i > 0 || !ptr)
 		return NULL;
-	else return ptr->data;
+	else return ptr;
 }
 
 static void logger_seq_stop(struct seq_file *s, void *v)
@@ -274,8 +289,11 @@ static void logger_seq_stop(struct seq_file *s, void *v)
 
 static int logger_seq_show(struct seq_file *s, void *v)
 {
-	char *str = (char*)v;
+	struct logger_quantum *ptr = v;
 	int i = 0;
+	char *str = (char*)ptr->data;
+
+	if(ptr->vcpu_id != 0) return 0;
 
 	seq_puts(s, "<start>=================\n");
 	for(i = 0; i < 4096; i++)
@@ -320,6 +338,7 @@ static void logger_dev_init(struct logger_dev *dev)
 		memset(dev, 0, sizeof(*dev));
 		spin_lock_init(&dev->dev_lock);
 		init_waitqueue_head(&dev->queue);
+		dev->state = NORMAL;
 
 		for(i = 0; i < MAX_VCPU; ++i) {
 			dev->quantums[i].vcpu_id = i;
@@ -400,7 +419,6 @@ fail_create_cache:
 	if(data_cache)
 		kmem_cache_destroy(data_cache);
 	unregister_chrdev_region(dev, 1);
-	printk(KERN_ALERT "logger_init(): fail to create cache\n");
 
 out:
 	return result;
@@ -480,9 +498,11 @@ void logger_cleanup(void)
 
 
 
-
-//Called when there is no rom to store log, alloc a new struct logger_quantum and a page
-//Before calling this function, you should get the lock
+/* this function should not be used now. It is obsolete
+ *Called when there is no rom to store log, alloc a new struct logger_quantum and a page
+ *Before calling this function, you should get the lock
+ */
+ /*
 int logger_alloc_page(void)
 {
 	struct logger_quantum *ptr;
@@ -519,6 +539,8 @@ int logger_alloc_page(void)
 out:
 	return result;
 }
+*/
+
 
 /* this function is called when there is no room for a vcpu_quantum to store a log
  * it first allocates a new quantum to the vcpu_quantum
@@ -536,7 +558,7 @@ int logger_alloc_move_page(struct vcpu_quantum *vq)
 		goto move;
 	}
 
-	memset(ptr, 0, sizeof(*ptr));
+	memset(ptr, 0, sizeof(*ptr));	/* ptr->quantum_size is set to 0 */
 
 	ptr->data = kmem_cache_alloc(data_cache, GFP_ATOMIC);
 	if(!ptr->data) {
@@ -573,6 +595,7 @@ move:
 	}
 	assert(vq->str != ptr->data);
 	ptr->next = NULL;
+	ptr->quantum_size = logger_quantum;	/* it is a full quantum */
 	spin_lock(&logger_dev.dev_lock);
 	if(logger_dev.head == NULL) {
 		logger_dev.head = ptr;
@@ -581,6 +604,7 @@ move:
 		logger_dev.tail->next = ptr;
 		logger_dev.tail = ptr;
 	}
+	wake_up_interruptible(&logger_dev.queue);
 	spin_unlock(&logger_dev.dev_lock);
 
 	return ret;
@@ -1414,6 +1438,9 @@ int print_record_id(int vcpu_id, const char *fmt, ...)
 {
 	va_list args;  
 	int r; 
+
+	if(unlikely(logger_dev.state != NORMAL))
+		return 0;
 
 	va_start(args, fmt);
 

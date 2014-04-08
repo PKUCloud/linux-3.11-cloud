@@ -26,100 +26,10 @@
 #define KVM_RECORD_HARDWARE_WALK_MEMSLOT 2
 #define KVM_RECORD_MAX_MODE 3
 
+#define MAX_VCPU 256
 #define LOGGER_IOC_MAGIC 0XAF
 #define LOGGER_FLUSH	_IO(LOGGER_IOC_MAGIC, 0)
 
-
-/**
-*fname: the file name of the device to map
-*fname_log: the output file name of the log
-*/
-void log2file(const char *fname, const char *fname_log)
-{
-	FILE *f;
-	FILE *f_log;
-	unsigned long offset = 0, len = 4096;
-	void *address = (void*)-1;
-	char *str;
-	int i;
-	int result;
-	char buf[4096];
-
-	//open the file to map
-	if(!(f = fopen(fname, "r"))) {
-		fprintf(stderr, "Fail to open %s: %s\n", fname, strerror(errno));
-		exit(1);
-	}
-
-	//open the file to write the log into
-	if(!(f_log = fopen(fname_log, "w"))) {
-		fprintf(stderr, "Fail to open %s to write into: %s\n", fname_log, strerror(errno));
-		exit(1);
-	}
-
-	printf("Logging...\n"
-		"Use flush command to stop logging\n");
-	//i = 0;
-	while(1) {
-		//i++;
-		//mmap
-		result = fread(buf, 1, len, f);
-
-		if(result != len) {
-			//the kernel has flushed the data
-
-			if(feof(f)) {
-				//now data is in buf
-				if(fwrite(buf, 1, result, f_log) != result){
-					fprintf(stderr, "fwrite() %s fail:%s\n", fname_log, strerror(errno));
-					fclose(f);
-					fclose(f_log);
-					exit(1);
-				}
-
-				break;   //finish
-			}else {
-				//error
-				fprintf(stderr, "fread file %s error:%s\n", fname, strerror(errno));
-				fclose(f);
-				fclose(f_log);
-				exit(1);
-			}
-		}
-
-		//now mmap and read the data
-		address = mmap(0, len, PROT_READ, MAP_LOCKED | MAP_SHARED, fileno(f), offset);
-		if(address == (void *)-1) {
-			fprintf(stderr, "mmap() file%s error:%s\n",fname, strerror(errno));
-			fclose(f);
-			fclose(f_log);
-			exit(1);
-		}
-			
-		//output the log to fname_log
-		str = (char*)address;
-
-		//fprintf(f_log, "<start>==========\n");
-
-		if(fwrite(str, len, 1, f_log) != 1){
-			fprintf(stderr, "fwrite() %s fail:%s\n", fname_log, strerror(errno));
-			fclose(f);
-			fclose(f_log);
-			exit(1);
-		}
-		//fprintf(f_log, "\n<end>============\n");
-
-		//the driver will delete the data that mapped currently
-		//so when we map the same address next time, it will actually be the next page
-		munmap(address, len);
-
-		address = (void *)-1;
-	}
-
-	printf("Logs has been written into file %s\n", fname_log);
-	fclose(f);
-	fclose(f_log);
-}
 
 struct {
 	int type;
@@ -146,6 +56,15 @@ struct kvm_record_ctrl {
 	int print_log;
 };
 
+
+/* contains the info of a quantum
+ * only used to communicate with kernel-space
+ */
+struct quantum_info {
+	int vcpu_id;	/* the vcpu_id of the owner of this quantum */
+	int quantum_size;	/*the valid data size of this quantum */
+};
+
 int help() {
 	fprintf(stderr, "Usage: \n"
 			"record_ctrl <enable/disable> <record_type> <value> <log_file> [<record_mode> <print_log>]\n"
@@ -170,16 +89,131 @@ int flush(void)
 	int fd_logger;
 	int ret;
 	fd_logger = open("/dev/logger", 0);
-		if(fd_logger < 0) {
-			printf("Open /dev/logger failed\n");
-			return -1;
+	if(fd_logger < 0) {
+		fprintf(stderr, "Err: fail to open() /dev/logger to flush: %s\n", strerror(errno));
+		return -1;
+	}
+	ret = ioctl(fd_logger, LOGGER_FLUSH);
+	if(ret == -1) {
+		fprintf(stderr, "Err: flush operation NOT permitted while recording: %s\n", strerror(errno));
+	}
+
+out:
+	close(fd_logger);
+	return ret;
+}
+
+
+int write_file(FILE **log_files, struct quantum_info *qinfo, void *address, const char *fname_log)
+{
+	char *str;
+	int ret = 0;
+	char buf[512]; /* for file name */
+	int i;
+
+	if(qinfo->quantum_size == 0)
+		goto out;
+
+	if(!log_files[qinfo->vcpu_id]) {
+		/* file not exists yet */
+		sprintf(buf, "%s_%d", fname_log, qinfo->vcpu_id);
+		if(!(log_files[qinfo->vcpu_id] = fopen(buf, "w"))) {
+			ret = errno;
+			fprintf(stderr, "Fail to fopen() file %s: %s\n", buf, strerror(ret));
+			goto out;
+		} else {
+			printf("Log file %s created for vcpu %d\n", buf, qinfo->vcpu_id);
 		}
-		ret = ioctl(fd_logger, LOGGER_FLUSH);
-		if(ret < 0) {
-			printf("Flush failed\n");
-			return -1;
+	}
+
+	str = (char*)address;
+	if(fwrite(str, qinfo->quantum_size, 1, log_files[qinfo->vcpu_id]) != 1) {
+		ret = errno;
+		fprintf(stderr, "Fail to fwrite() file for vcpu %d: %s\n", qinfo->vcpu_id, strerror(ret));
+	}
+
+out:
+	return ret;
+}
+
+/**
+*read the memory out from the device and write to a file
+*fname: the file name of the device to map
+*fname_log: the output file name of the log
+*/
+void log2file(const char *fname, const char *fname_log)
+{
+	int fdev;
+	FILE *log_files[MAX_VCPU] = {0};	/* one file for each vcpu */
+	unsigned long offset = 0, len = 4096;
+	void *address = (void*)-1;
+	int i;
+	int ret;
+	struct quantum_info qinfo;	/*used to communicate with the kernel-space */
+	char buf[4096];
+	
+	int info_size = sizeof(struct quantum_info);
+
+	/* Use open() to open the device
+	 * If we use fopen(), there may be some problems with the buffer
+	 */
+	if((fdev = open(fname, 0)) == -1) {
+		fprintf(stderr, "Fail to open %s: %s\n", fname, strerror(errno));
+		goto out;
+	}
+
+	printf("Logging...\n"
+		"\tUse flush command to stop logging\n");
+
+	while(1) {
+		ret = read(fdev, &qinfo, info_size);
+		if(ret != info_size) {
+			/* maybe eof or error */
+			if(ret == 0) {
+				/* end of file
+				 * there is no more data in the device now
+				 */
+				break;
+			} else if(ret < 0) {
+				/* error */
+				fprintf(stderr, "Error occurs in fread() for %s: %s\n", fname, strerror(errno));
+				goto out;
+			} else {
+				fprintf(stderr, "Error occurs in fread() for %s: request %d bytes while returns %d\n",
+					fname, info_size, ret);
+				goto out;
+			}
 		}
-		return 0;
+
+		/* now qinfo contains infomation about current quantum */
+		address = mmap(0, len, PROT_READ, MAP_LOCKED | MAP_SHARED, fdev, offset);
+		if(address == (void*)-1) {
+			fprintf(stderr, "Fail to mmap() file %s: %s\n", fname, strerror(errno));
+			goto out;
+		}
+
+		ret = 0;
+		ret = write_file(log_files, &qinfo, address, fname_log);
+
+		munmap(address, len);
+		address = (void*)-1;
+		
+		/* write_file() fail */
+		if(ret)
+			goto out;
+	}
+
+	printf("Logs has been written into files\n");
+
+out:
+	if(fdev != -1)
+		close(fdev);
+	for(i = 0; i < MAX_VCPU; ++i) {
+		if(log_files[i]) {
+			fclose(log_files[i]);
+		}
+	}
+	return;
 }
 
 int main(int argc, char **argv)
@@ -206,6 +240,11 @@ int main(int argc, char **argv)
 	}else if(strcmp(argv[1], "help") == 0) {
 		//print help info
 		return help();
+	} else if(strcmp(argv[1], "test") == 0) {
+		/* just for test */
+		//log2file("/dev/logger", "tamlok.log");
+		printf("I am just for testing\n");
+		return 0;
 	}
 
 	fd = open("/dev/kvm", 0);
@@ -223,7 +262,7 @@ int main(int argc, char **argv)
 	}
 
 	if (record) {
-		char *fname_log = "kern.log";
+		char *fname_log = "record.log";
 
 		if (argc < 5)
 			return help();
