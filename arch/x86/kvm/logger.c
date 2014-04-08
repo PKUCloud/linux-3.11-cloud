@@ -239,6 +239,7 @@ static void *logger_seq_start(struct seq_file *s, loff_t *pos)
 	struct logger_quantum *ptr;
 
 	spin_lock(&logger_dev.dev_lock);
+
 	ptr = logger_dev.head;
 	while(ptr != NULL && i > 0){
 		ptr = ptr->next;
@@ -519,6 +520,72 @@ out:
 	return result;
 }
 
+/* this function is called when there is no room for a vcpu_quantum to store a log
+ * it first allocates a new quantum to the vcpu_quantum
+ * then it moves the former full page (if exists) to the global out_list
+ */
+int logger_alloc_move_page(struct vcpu_quantum *vq)
+{
+	struct logger_quantum *ptr;
+	int ret = 0;
+
+	ptr = kmem_cache_alloc(quantum_cache, GFP_ATOMIC);
+	if(!ptr) {
+		ret = -ENOMEM;
+		pr_err("Err: %d fail to kmem_cache_alloc() for logger\n", ret);
+		goto move;
+	}
+
+	memset(ptr, 0, sizeof(*ptr));
+
+	ptr->data = kmem_cache_alloc(data_cache, GFP_ATOMIC);
+	if(!ptr->data) {
+		kmem_cache_free(quantum_cache, ptr);
+		ret = -ENOMEM;
+		pr_err("Err: %d fail to kmem_cache_alloc() for logger\n", ret);
+		goto move;
+	}
+
+	memset(ptr->data, 0, logger_quantum);
+	ptr->vcpu_id = vq->vcpu_id;
+	vq->str = (char*)ptr->data;
+	vq->end = vq->str + logger_quantum;
+	if(vq->head == NULL) {
+		vq->head = ptr;
+		vq->tail = ptr;
+	} else {
+		vq->tail->next = ptr;
+		vq->tail = ptr;
+		goto move;
+	}
+
+	return ret;
+
+move:
+	if(vq->head == NULL) 
+		return ret;
+	/* move the head quantum to the global out_list */
+	ptr = vq->head;
+	vq->head = vq->head->next;
+	if(vq->tail == ptr) {	/* there is only one page */
+		vq->tail = vq->head;
+		assert(vq->tail == NULL && vq->str != ptr->data);
+	}
+	assert(vq->str != ptr->data);
+	ptr->next = NULL;
+	spin_lock(&logger_dev.dev_lock);
+	if(logger_dev.head == NULL) {
+		logger_dev.head = ptr;
+		logger_dev.tail = ptr;
+	} else {
+		logger_dev.tail->next = ptr;
+		logger_dev.tail = ptr;
+	}
+	spin_unlock(&logger_dev.dev_lock);
+
+	return ret;
+}
+
 
 static noinline_for_stack
 int skip_atoi(const char **s)
@@ -730,7 +797,7 @@ char *put_dec(char *buf, unsigned long long n)
 
 //return the length of the total output
 static noinline_for_stack
-int number(char **buf, char **end, unsigned long long num,
+int number(struct vcpu_quantum *vq, unsigned long long num,
 	struct printf_spec spec)
 {
 	static const char digits[16] = "0123456789ABCDEF";
@@ -792,37 +859,41 @@ int number(char **buf, char **end, unsigned long long num,
 	spec.field_width -= spec.precision;
 	if(!(spec.flags & (ZEROPAD + LEFT))) {
 		while(--spec.field_width >= 0) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = ' ';
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = ' ';
+			++(vq->str);
 			++length;
 		}
 	}
 
 	//signed
 	if(sign) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = sign;
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = sign;
+		++(vq->str);
 		++length;
 	}
 
 	//"0x" or "0" prefix
 	if(need_pfx) {
 		if(spec.base == 16 || !is_zero) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = '0';
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = '0';
+			++(vq->str);
 			++length;
 		}
 		if(spec.base == 16) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = ('X' | locase);
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = ('X' | locase);
+			++(vq->str);
 			++length;
 		}
 	}
@@ -831,40 +902,43 @@ int number(char **buf, char **end, unsigned long long num,
 	if(!(spec.flags & LEFT)) {
 		char c = (spec.flags & ZEROPAD) ? '0' : ' ';
 		while(--spec.field_width >= 0) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = c;
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = c;
+			++(vq->str);
 			++length;
 		}
 	}
 
 	//even more zero padding
 	while(i <= --spec.precision) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = '0';
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = '0';
+		++(vq->str);
 		++length;
 	}
 
 	//actual digits of result
 	while(--i >= 0) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		//(*buf)[0] = tmp[i];
-		**buf = tmp[i];
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = tmp[i];
+		++(vq->str);
 		++length;
 	}
 	
 
 	//trailing space padding
 	while(--spec.field_width >= 0) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = ' ';
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = ' ';
+		++(vq->str);
 		++length;
 	}
 
@@ -874,7 +948,7 @@ int number(char **buf, char **end, unsigned long long num,
 
 //return the length of the total output
 static noinline_for_stack
-int string(char **buf, char **end, const char *s, struct printf_spec spec)
+int string(struct vcpu_quantum *vq, const char *s, struct printf_spec spec)
 {
 	int len, i, length = 0;
  	/* what does it mean? */
@@ -888,26 +962,30 @@ int string(char **buf, char **end, const char *s, struct printf_spec spec)
 
 	if(!(spec.flags & LEFT)) {
 		while(len < spec.field_width--) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = ' ';
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = ' ';
+			++(vq->str);
 			++length;
 		}
 	}
 	for (i = 0; i < len; ++i) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = *s;
-		++(*buf);++s;
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = *s;
+		++(vq->str);
+		++s;
 	}
 	length += len;
 
 	while(len < spec.field_width--) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = ' ';
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = ' ';
+		++(vq->str);
 		++length;
 	}
 
@@ -1107,17 +1185,17 @@ qualifier:
 }
 
 
-//should get the lock before calling this function
-static int __print_record(const char* fmt, va_list args)
+/* print the message into the destinated struct vcpu_quantum's list */
+static int __print_record(struct vcpu_quantum *vq, const char* fmt, va_list args)
 {
 	unsigned long long num;
-	char **str, **end;
 	struct printf_spec spec = {0};
 	int i, length = 0;
 
-
+	/*
 	str = &logger_dev.str;
 	end = &logger_dev.end;
+	*/
 
 	//print the timestamp at the front of every message
 	if(logger_dev.print_time) {
@@ -1131,10 +1209,11 @@ static int __print_record(const char* fmt, va_list args)
 		tlen = sprintf(tbuf, "[%5lu.%06lu] ", (unsigned long)t, nanosec_rem / 1000);
 
 		for(i = 0; i < tlen; ++i) {
-			if(unlikely(*str >= *end)) 
-				logger_alloc_page();
-			**str = tbuf[i];
-			++(*str);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = tbuf[i];
+			++(vq->str);
 			++length;
 		}
 	}
@@ -1148,22 +1227,23 @@ static int __print_record(const char* fmt, va_list args)
 		switch(spec.type) {
 			case FORMAT_TYPE_NONE: {
 				int copy = read;
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
 
 				i = 0;
-				while(copy - i > *end - *str) {
-					memcpy(*str, old_fmt + i, *end - *str);
-					i += (*end - *str);
-					logger_alloc_page();
+				while(copy - i > vq->end - vq->str) {
+					memcpy(vq->str, old_fmt + i, vq->end - vq->str);
+					i += (vq->end - vq->str);
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
 				}
 
-				memcpy(*str, old_fmt + i, copy - i);
+				memcpy(vq->str, old_fmt + i, copy - i);
 
-				*str += (copy - i);
+				vq->str += (copy - i);
 				length += read;
 				break;
-
 			}
 
 			case FORMAT_TYPE_WIDTH: 
@@ -1181,39 +1261,42 @@ static int __print_record(const char* fmt, va_list args)
 				if(!(spec.flags & LEFT)) {
 					//space padding
 					while(--spec.field_width > 0) {
-						if(unlikely(*str >= *end))
-							logger_alloc_page();
-						**str = ' ';
-						++(*str);
+						if(unlikely(vq->str >= vq->end)) 
+							if(unlikely(logger_alloc_move_page(vq)))
+								return length;
+						*(vq->str) = ' ';
+						++(vq->str);
 						++length;
 					}
 				}
 
 				c = (unsigned char) va_arg(args, int);
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
-				**str = c;
-				++(*str);
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
+				*(vq->str) = c;
+				++(vq->str);
 				++length;
 
 				//left align
 				while(--spec.field_width > 0) {
-					if(unlikely(*str >= *end))
-						logger_alloc_page();
-					**str = ' ';
-					++(*str);
+					if(unlikely(vq->str >= vq->end)) 
+						if(unlikely(logger_alloc_move_page(vq)))
+							return length;
+					*(vq->str) = ' ';
+					++(vq->str);
 					++length;
 				}
 				break;
 			}
 
 			case FORMAT_TYPE_STR:
-				i = string(str, end, va_arg(args, char* ),spec);
+				i = string(vq, va_arg(args, char* ),spec);
 				length += i;
 				break;
 
-			//not implemented yet
-			/**
+
+			/** not implemented yet
 			case FORMAT_TYPE_PTR:
 				str = pointer(fmt+1, str, end, va_arg(args, void *),
 					spec);
@@ -1223,19 +1306,20 @@ static int __print_record(const char* fmt, va_list args)
 			**/
 
 			case FORMAT_TYPE_PERCENT_CHAR:
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
-				**str = '%';
-				++(*str);
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
+				*(vq->str) = '%';
+				++(vq->str);
 				++length;
-				
 				break;
 
 			case FORMAT_TYPE_INVALID:
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
-				**str = '%';
-				++(*str);
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
+				*(vq->str) = '%';
+				++(vq->str);
 				++length;
 				break;
 
@@ -1304,16 +1388,15 @@ static int __print_record(const char* fmt, va_list args)
 					default:
 						num = va_arg(args, unsigned int);
 				}
-				i = number(str, end, num, spec);
+				i = number(vq, num, spec);
 				length += i;
 		}
 	}
 
 
-	if(*str < *end)
-		**str = '\0';
+	if(vq->str < vq->end)
+		*(vq->str) = '\0';
 
-	//printk(KERN_ALERT "%s", buf);
 	//the trailing null byte doesn't count towards the total
 	return length;
 }
@@ -1322,34 +1405,7 @@ static int __print_record(const char* fmt, va_list args)
 /*this function should be removed */
 int print_record(const char *fmt, ...)
 {
-	va_list args;  
-	int r; 
-
-	va_start(args, fmt);
-	
 	return 0;
-
-	spin_lock(&logger_dev.dev_lock);
-	if(logger_dev.state != NORMAL) {
-		r = -1;
-		goto out;
-	}
-	r = __print_record(fmt, args);
-
-	//just for test
-	//va_end(args);
-	//va_start(args, fmt);
-	//vprintk_emit(0, -1, NULL, 0, fmt, args);
-
-	logger_dev.size += r;
-	if(logger_dev.size >= logger_quantum) {
-		wake_up_interruptible(&logger_dev.queue);
-	}
-
-out:
-	spin_unlock(&logger_dev.dev_lock);
-	va_end(args);
-	return r;   
 }
 EXPORT_SYMBOL_GPL(print_record);
 
@@ -1361,11 +1417,8 @@ int print_record_id(int vcpu_id, const char *fmt, ...)
 
 	va_start(args, fmt);
 
-	pr_debug("Hello, vcpu_id is %d\n", vcpu_id);
-	//r = __print_record(fmt, args);
-	r = 0;
+	r = __print_record(&logger_dev.quantums[vcpu_id], fmt, args);
 
-out:
 	va_end(args);
 	return r;   
 }
