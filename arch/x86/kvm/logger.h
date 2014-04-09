@@ -121,7 +121,7 @@ struct printf_spec {
 	s16	precision;	/* # of digits/chars */
 };
  
-int print_record(const char *fmt, ...);
-int print_record_id(int vcpu_id, const char *fmt, ...);
+
+int print_record(int vcpu_id, const char *fmt, ...);
 
 #endif

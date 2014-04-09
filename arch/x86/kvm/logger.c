@@ -1426,15 +1426,7 @@ static int __print_record(struct vcpu_quantum *vq, const char* fmt, va_list args
 }
 
 
-/*this function should be removed */
-int print_record(const char *fmt, ...)
-{
-	return 0;
-}
-EXPORT_SYMBOL_GPL(print_record);
-
-
-int print_record_id(int vcpu_id, const char *fmt, ...)
+int print_record(int vcpu_id, const char *fmt, ...)
 {
 	va_list args;  
 	int r; 
@@ -1449,7 +1441,7 @@ int print_record_id(int vcpu_id, const char *fmt, ...)
 	va_end(args);
 	return r;   
 }
-EXPORT_SYMBOL_GPL(print_record_id);
+EXPORT_SYMBOL_GPL(print_record);
 
 module_init(logger_init);
 module_exit(logger_cleanup);
