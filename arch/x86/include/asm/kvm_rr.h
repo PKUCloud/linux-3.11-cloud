@@ -29,13 +29,7 @@
 	if(KVM_DEBUG_ON && vcpu->num_recs > DBG_NUM_RECS) printk(KERN_ALERT __VA_ARGS__); \
 	} while(0)  
 
-#define KVM_DEBUG_LOG_ON 0
-
-#define kvm_debug_log(...) do{ \
-	if(KVM_DEBUG_LOG_ON && vcpu->num_recs > DBG_NUM_RECS ) printk(KERN_ALERT __VA_ARGS__); \
-	} while(0)  
-
-
+#define KVM_DEBUG_LOG_ON 0 
 #define KVM_ERR_ON 1
 
 #define kvm_err(...) do{\
@@ -201,7 +195,7 @@ struct kvm_rr_ext_int
 {
 	u8 rec_type; 
 	u8 int_vec;
-	u8 is_realmode;
+	//u8 is_realmode;
 	u8 irq;
 	u32 irq_count;
 	struct kvm_rr_ts next_ts;
@@ -281,19 +275,6 @@ int is_kvm_rr_msr(u32 msr);
 
 u64 read_pmc1();
 
-#ifdef CONFIG_X86_64
-u64 read_dr2();
-void write_dr2(u64 val);
-u64 read_dr6();
-void write_dr6(u64 val);
-#else 
-u32 read_dr2();
-void write_dr2(u32 val);
-u32 read_dr6();
-void write_dr6(u32 val);
-#endif
-
-
 void init_kvm_rr_msr(struct msr_autosave_rr *msr_rr);
 
 int config_msr_rr_state(struct msr_autosave_rr *msr_rr);
@@ -306,21 +287,15 @@ void inline clear_ovf_bit_pmc1();
 
 int inline check_ovf_bit_pmc1();
 
-int kvm_rr_add_to_pending_reqs(struct kvm_vcpu  *vcpu, struct kvm_rr_rec_request *req);
-
-void kvm_rr_remove_pending_reqs(struct kvm_vcpu *vcpu);
-
 int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu);
-
-// int kvm_rr_rply_reqs(struct kvm_vcpu *vcpu);
 
 int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *pkt);
 
 int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 				void *data);
-char * get_log_buf();
+//char * get_log_buf();
 
-void *get_log_data_ptr(struct kvm_vcpu *vcpu);
+//void *get_log_data_ptr(struct kvm_vcpu *vcpu);
 
 u8  read_log(struct kvm_vcpu *vcpu);
 
