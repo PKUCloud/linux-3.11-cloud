@@ -7464,8 +7464,8 @@ int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 			((intr & INTR_INFO_INTR_TYPE_MASK) == INTR_TYPE_EXT_INTR))
 		{
 			int_log->int_vec = intr & INTR_INFO_VECTOR_MASK;
-			int_log->is_realmode = 0;
-			int_log->irq_count = atomic_read(&vcpu->irq_counts[int_log->int_vec]);
+			//int_log->is_realmode = 0;
+			int_log->irq_count = atomic_read(&vcpu->irq_counts[int_log->int_vec]);	//used to synchronize DMA
 
 			// we can't predict the next br, so give it enough space
 			// which will be updated later in user space before replay
@@ -7506,7 +7506,7 @@ int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 		//vmx_clear_hlt(vcpu);	//we don't need it any more.
 	}
 	*/
-	
+	return 0;
 }
 
 // end kvm rr

@@ -43,7 +43,6 @@ int is_kvm_rr_msr(u32 msr)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(is_kvm_rr_msr);
 
 
 void init_kvm_rr_msr(struct msr_autosave_rr *msr_rr)
@@ -132,7 +131,6 @@ int inline check_ovf_bit_pmc1()
 	rdmsrl(KVM_RR_IA32_PERF_GLOBAL_STATUS, val);
 	return val & 0x2;
 }
-EXPORT_SYMBOL_GPL(check_ovf_bit_pmc1);
 
 
 u64 read_pmc1()
@@ -155,104 +153,6 @@ u64 read_pmc1()
 	return result;
 }
 EXPORT_SYMBOL_GPL(read_pmc1);
-
-
-
-#ifdef CONFIG_X86_64 
-u64 read_dr2()
-{
-	u64 ret;
-	__asm__ __volatile__ (
-	"mov %%dr2, %0\n\t"
-	: "=&r" (ret)
-	: 
-	: );
-	return ret;
-
-}
-EXPORT_SYMBOL_GPL(read_dr2);
-
-
-u64 read_dr6()
-{
-	u64 ret;
-	__asm__ __volatile__ (
-	"mov %%dr6, %0\n\t"
-	: "=&r" (ret)
-	: 
-	: );
-	return ret;
-
-}
-EXPORT_SYMBOL_GPL(read_dr6);
-
-
-void write_dr2(u64 val)
-{
-	__asm__ __volatile__ (
-	"mov %0, %%dr2\n\t"
-	:
-	: "r" (val)
-	: );
-}
-EXPORT_SYMBOL_GPL(write_dr2);
-
-void write_dr6(u64 val)
-{
-	__asm__ __volatile__ (
-	"mov %0, %%dr6\n\t"
-	:
-	: "r" (val)
-	: );
-}
-EXPORT_SYMBOL_GPL(write_dr6);
-	
-#else 
-u32 read_dr2()
-{
-
-	u32 ret;
-	__asm__ __volatile__ (
-	"mov %%dr2, %0\n\t"
-	: "=&r" (ret)
-	:
-	: );
-	return ret;
-}
-EXPORT_SYMBOL_GPL(read_dr2);
-
-u32 read_dr6()
-{
-
-	u32 ret;
-	__asm__ __volatile__ (
-	"mov %%dr6, %0\n\t"
-	: "=&r" (ret)
-	:
-	: );
-	return ret;
-}
-EXPORT_SYMBOL_GPL(read_dr6);
-
-void write_dr2(u32 val)
-{
-	__asm__ __volatile__ (
-	"mov %0, %%dr2\n\t"
-	:
-	: "r" (val)
-	: );
-}
-EXPORT_SYMBOL_GPL(write_dr2);
-
-void write_dr6(u32 val)
-{
-	__asm__ __volatile__ (
-	"mov %0, %%dr6\n\t"
-	:
-	: "r" (val)
-	: );
-}
-EXPORT_SYMBOL_GPL(write_dr6);
 
 #endif
 
@@ -287,64 +187,6 @@ void copy_guest_store_to_load(struct msr_autosave_rr *msr_rr)
 }
 EXPORT_SYMBOL_GPL(copy_guest_store_to_load);
 
-
-// removes the entire list, called when vcpu is freed
-void kvm_rr_remove_pending_reqs(struct kvm_vcpu *vcpu)
-{
-
-	struct kvm_rr_reqs_list *req,*temp;
-	// take precautionary lock, no should actual add when
-	// this is called 
-	spin_lock(&vcpu->pending_reqs_lock);
-
-	req =  vcpu->pending_reqs;
-	while(req)
-	{
-		temp = req->next;
-
-		kvm_debug("removing reqs from pending list %x\n",req);
-		kfree(req);
-		req = temp;
-	}
-	vcpu->pending_reqs = NULL;
-
-	spin_unlock(&vcpu->pending_reqs_lock);
-
-
-}
-EXPORT_SYMBOL_GPL(kvm_rr_remove_pending_reqs);
-
-
-int kvm_rr_add_to_pending_reqs(struct kvm_vcpu  *vcpu, struct  kvm_rr_rec_request *req)
-{
-
-	// when we record this  COMPLETE BIT is
-	// not set, we add these record to log file
-	// we will set the corresponding COMPLETE BIT
-	
-	struct kvm_rr_reqs_list *req_list_element;
-	req_list_element = (struct kvm_rr_reqs_list *)kmalloc(sizeof(struct kvm_rr_reqs_list),GFP_KERNEL);
-	kvm_debug("adding reqs to pending list %x gpa %x type %d \n", \
-				req_list_element,req->gpa,req->req_type);
-	req_list_element->next = NULL;
-	
-	req_list_element->gpa = req->gpa;
-	req_list_element->size = req->size;
-	req_list_element->req_type = req->req_type;
-
-	// take the pending_pkts_lock before adding this new pkt to 
-	// the pending list
-	spin_lock(&vcpu->pending_reqs_lock);
-
-	req_list_element->next = vcpu->pending_reqs;
-	vcpu->pending_reqs = req_list_element;
-
-	spin_unlock(&vcpu->pending_reqs_lock);
-	
-}
-EXPORT_SYMBOL_GPL(kvm_rr_add_to_pending_reqs);
-
-
 int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 {
 	gfn_t gfn;
@@ -365,9 +207,6 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 		}
 	
 		// copy from rfd to log
-		kvm_debug_log("LOG_REQ %lu:%llu,%llx,%llx:size %d addr %x %d\n",\
-	               vcpu->num_recs,vcpu->rr_ts.br_count,vcpu->rr_ts.rcx,vcpu->rr_ts.rip,req->size,\
-				 req->gpa,sizeof(struct kvm_rr_req));
 		/*
 		if(vcpu->log_offset == -1 && vcpu->is_recording)
 		{
@@ -699,13 +538,12 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 		ext_int_rr_log = data;
 		printk( "Interrupt : " \
 				"Interrupt vector: %u, " \
-				"CPU mode: %u, " \
 				"IRQ number: %u, " \
 				"IRQ count: %d ,"
 				"ts.rip: %llu,"\
 				"ts.ecx: %llu,"\
 				"ts.bc: %llu"
-				"\n", ext_int_rr_log->int_vec, ext_int_rr_log->is_realmode, \
+				"\n", ext_int_rr_log->int_vec, \
 				ext_int_rr_log->irq, ext_int_rr_log->irq_count , ts->rip , ts->rcx , ts->br_count); 
 		*/
 		break;
