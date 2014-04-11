@@ -7457,8 +7457,7 @@ int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 {
 	u32 intr = 0 ;
 	struct kvm_rr_ext_int *int_log = &vcpu->int_log;
-	if(vcpu->is_recording)
-	{
+	if (kvm_record) {
 		intr = vmcs_read32(VM_ENTRY_INTR_INFO_FIELD);
 		if((intr & INTR_INFO_VALID_MASK) && \
 			((intr & INTR_INFO_INTR_TYPE_MASK) == INTR_TYPE_EXT_INTR))
@@ -7481,15 +7480,13 @@ int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 			vcpu->rr_ts.rcx = kvm_register_read(vcpu, VCPU_REGS_RCX);
 
 		}
-		else
-		{
+		else {
 			// no valid intr to record
 			int_log->int_vec = 0;
 		}
 	} // end of recording
 	/*
-	else if(vcpu->is_replaying)
-	{
+	else if (vcpu->is_replaying) {
 		// only when enternal interrupt (hard)
 		intr = vcpu->arch.interrupt.nr | INTR_INFO_VALID_MASK | INTR_TYPE_EXT_INTR;
 		kvm_debug_log("RPLY_INT: %lu:%llu,%llx,%llx:%u\n",\
@@ -7569,9 +7566,8 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	// configA_msr_rr_state is called only once when 
 	// intialization of register values are required.
 
-	if(!vmx->msr_autosave_rr_initialized && \
-			(vcpu->is_replaying || vcpu->is_recording))
-	{
+	if (!vmx->msr_autosave_rr_initialized && \
+			(kvm_record || vcpu->is_replaying)) {
 		vmx->msr_autosave_rr_initialized = 1;
 		config_msr_rr_state(&vmx->msr_autosave_rr);
 		
@@ -7596,8 +7592,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	host_dbgctl |= (1 << 14);
 	wrmsrl(MSR_IA32_DEBUGCTLMSR, host_dbgctl);
 
-	if(vcpu->is_recording)
-	{
+	if (kvm_record) {
 		// disable all counters and reset the counter 2 
 		// to zero at host. 
 		wrmsrl(rr_msr_map[KVM_RR_IA32_PERF_GLOBAL_CTRL_IDX],(u64)0);
@@ -7782,8 +7777,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//check if this interrupt was injected success?
 	vmx->idt_vectoring_info = vmcs_read32(IDT_VECTORING_INFO_FIELD);
 
-	if(vcpu->is_recording && vcpu->int_log.int_vec && !vmx->idt_vectoring_info) 
-	{
+	if (kvm_record && vcpu->int_log.int_vec && !vmx->idt_vectoring_info) {
 		// this will have the old branch count and stats before
 		// vm entry.. so it is OK
 		// NOTE --- real mode interrupts are delivered through software
@@ -7806,7 +7800,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	vcpu->rr_ts.rcx = vcpu->arch.regs[VCPU_REGS_RCX]; 
 	u64 curr_br_count = read_pmc1();
 
-	if(vcpu->is_recording){
+	if(kvm_record) {
 		vcpu->rr_ts.br_count += curr_br_count;
 	}
 

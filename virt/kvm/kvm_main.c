@@ -85,6 +85,11 @@ struct kmem_cache *kvm_tm_page_cache;
 EXPORT_SYMBOL_GPL(kvm_tm_page_cache);
 
 bool kvm_record;
+
+// edit by rsr
+atomic64_t g_time_stamp;
+// end rsr
+
 EXPORT_SYMBOL_GPL(kvm_record);
 int kvm_record_type;
 EXPORT_SYMBOL_GPL(kvm_record_type);
@@ -2351,17 +2356,6 @@ static long kvm_vm_ioctl(struct file *filp,
 		int r_flag = -ENOTTY;
 		kvm_for_each_vcpu(r_flag,rr_v,kvm)
 		{
-			// check if already enabled , if yes
-			// return EEXIST
-			if(rr_v->is_recording || rr_v->is_replaying)
-			{
-				r_flag = -EEXIST;
-				printk( "<1>""init flag is_replaying failed !!!\n " );
-				break;
-			}
-			rr_v->is_recording = 1;
-			// acts as flag to write log record 
-			//rr_v->log_offset = -1;
 			rr_v->rr_ts.br_count = 0;
 			rr_v->output_counting = 0;	
 		
@@ -2710,6 +2704,11 @@ static long kvm_dev_ioctl(struct file *filp,
 		}
 		kvm_record_count = KVM_RECORD_COUNT;
 		kvm_record = true;
+
+		// edit by rsr, init global time stamp
+		atomic64_set(&g_time_stamp, 0);
+		//end rsr
+		
 		kvm_record_type = kvm_rc.kvm_record_type;
 		//kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MMU;
 		//kvm_record_mode = KVM_RECORD_HARDWARE_WALK_MEMSLOT;

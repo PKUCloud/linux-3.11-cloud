@@ -79,11 +79,13 @@
 // log record types
 #define KVM_RR_RDTSC		1
 #define KVM_RR_PIO_IN		2
-#define KVM_RR_MMIO_IN		3
-#define KVM_RR_EXT_INT		4
-#define KVM_RR_HEADER		5
-#define KVM_RR_REGS_SET		6
-#define KVM_RR_REQ		7
+#define KVM_RR_PIO_OUT		3
+#define KVM_RR_MMIO_IN		4
+#define KVM_RR_MMIO_OUT		5
+#define KVM_RR_EXT_INT		6
+#define KVM_RR_HEADER		7
+#define KVM_RR_REGS_SET		8
+#define KVM_RR_REQ			9
 
 
 // replay modes of execution
@@ -173,6 +175,14 @@ struct kvm_rr_pio_in
 	// whole 4096 data bytes
 	u8 rec_type; 
 	char data[KVM_RR_PIO_DATA_MAX];
+	u64 time_stamp;
+}; 
+
+struct kvm_rr_pio_out
+{
+	u8 rec_type; 
+	u64 time_stamp;
+	//we do not need to record any data
 }; 
 
 struct kvm_rr_regs_set
@@ -188,8 +198,14 @@ struct kvm_rr_mmio_in
 	char pad[7];
 	gpa_t mmio_phys_addr;
 	char data[8];
+	u64 time_stamp;
 };
 
+struct kvm_rr_mmio_out
+{
+	u8 rec_type;
+	u64 time_stamp;
+};
 
 struct kvm_rr_ext_int
 {
