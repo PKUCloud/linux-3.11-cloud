@@ -154,8 +154,6 @@ u64 read_pmc1()
 }
 EXPORT_SYMBOL_GPL(read_pmc1);
 
-#endif
-
 // this will save the require host msr state 
 // into VMCS specified mem area, these values will be
 // restored upon vm exit.
@@ -194,22 +192,18 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 	unsigned long hva;
 	unsigned int *rfd_sts;
 
-	if(vcpu->is_recording)
-	{
+	if(kvm_record) {
 		struct kvm_rr_req *req_log = (struct kvm_rr_req *)kmalloc(sizeof(struct kvm_rr_req), GFP_KERNEL);
 		
-		if(req->size > KVM_RR_REQ_MAX)
-		{
+		if(req->size > KVM_RR_REQ_MAX) {
 			// should not occur
 			kvm_err("big req than buffer size %d\n",req->size);
-			//vcpu->is_recording = 0;
 			return 0;
 		}
 	
 		// copy from rfd to log
 		/*
-		if(vcpu->log_offset == -1 && vcpu->is_recording)
-		{
+		if(vcpu->log_offset == -1 && vcpu->is_recording) {
 			struct kvm_rr_hdr hdr_log;
 			hdr_log.next_rec_type = 0;
 			// recording just started , write file header first
@@ -225,8 +219,7 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 		hva = gfn_to_hva(vcpu->kvm, gfn);
 		offset = offset_in_page(req->gpa);
 
-		if(req->req_type == REC_TYPE_RX_PKT)
-		{
+		if(req->req_type == REC_TYPE_RX_PKT) {
 			rfd_sts = hva+offset;
 			*rfd_sts = (*rfd_sts | (1<<15));
 			kvm_debug("rfd_sts %x\n",*rfd_sts);
@@ -243,31 +236,26 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 	} // end of recording
 
 	/*
-	else if(vcpu->is_replaying)
-	{
+	else if(vcpu->is_replaying) {
 		struct kvm_rr_req *req_log = NULL;
 		int ret;
 		ret = read_log(vcpu);	
-		if(ret <= 0 || ret != KVM_RR_REQ)
-		{
+		if(ret <= 0 || ret != KVM_RR_REQ) {
 			// disable replaying , undefined behavior
 			kvm_err("is out of sync %d expecting KVM_RR_REQ,\
 					 got %d\n", ret != KVM_RR_REQ, ret);
 			vcpu_disable_rply(vcpu);
               	}
-		else
-		{
+		else {
 			// just copy the input data from log file
 			req_log = get_log_data_ptr(vcpu);
 		}
-		if(!req_log)
-		{
+		if(!req_log) {
 			// disable replaying , undefined behavior
 			kvm_err("couldn't get data ptr\n");
 			vcpu_disable_rply(vcpu);
 		}
-		else
-		{
+		else {
 			
 			vcpu->next_rec_type = req_log->next_rec_type;
 			// copy to the place where user space would have
@@ -299,8 +287,7 @@ int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu)
 	struct kvm_rr_reqs_list *list=NULL,*temp;
 
 	
-	if(!vcpu->is_recording)
-	{
+	if(!kvm_record) {
 		// we should have empty list
 		if(vcpu->pending_reqs)
 			kvm_err("Not recording but list is non-empty\n");
@@ -320,8 +307,7 @@ int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu)
 	
 	spin_unlock(&vcpu->pending_reqs_lock);
 	
-	while(list)
-	{
+	while(list) {
 		
 		kvm_rr_req_handle(vcpu, list);
 		temp = list;
@@ -483,7 +469,7 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 
 	struct kvm_run *run=vcpu->run;
 
-	if(!vcpu->is_recording)	
+	if(!kvm_record)	
 		return 1;
 
 	//edit by rsr : just fot debug.... Should be delete later...
@@ -504,17 +490,25 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 		break;
 	}
 	case KVM_RR_PIO_IN: {
-		/*
+		
 		struct kvm_rr_pio_in *pio_rr_log;
 		pio_rr_log = data;
 		pio_rr_log->data[ vcpu->arch.pio.count * vcpu->arch.pio.size ] = '\0';
-
-		printk( "<1>""PIO : " \
+		printk( "VCPU %d :", vcpu->vcpu_id );
+		printk( "PIO IN: " \
 				"data length: %d, " \
 				"end position: %d, " \
-				"data(pio): %s" \
-				"\n", data_len, vcpu->arch.pio.count * vcpu->arch.pio.size, pio_rr_log->data ); 
-		*/
+				"data(pio): %s, " \
+				"time_stamp= %llu" \
+				"\n", data_len, vcpu->arch.pio.count * vcpu->arch.pio.size, pio_rr_log->data , pio_rr_log->time_stamp); 
+		
+		break;
+	}
+	case KVM_RR_PIO_OUT: {
+		struct kvm_rr_pio_out *pio_rr_log = data;
+		printk( "VCPU %d :", vcpu->vcpu_id );
+		printk("PIO OUT: time_stamp= %llu\n", pio_rr_log->time_stamp); 		
+		
 		break;
 	}
 	case KVM_RR_MMIO_IN: {
@@ -525,11 +519,17 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 		memset( rsr_out , 0 , 9 );
 		memcpy( rsr_out , mmio_rr_log->data , 8 );
 		rsr_out[8] = 0;
+		printk( "VCPU %d :", vcpu->vcpu_id );
+		printk( "MMIO IN, Data: %s  | " \
+				"Address: 0x%llx time_stamp= %llu \n" , rsr_out , mmio_rr_log->mmio_phys_addr, mmio_rr_log->time_stamp);
 		
-		printk( "Data: %s  | " \
-				"Address: 0x%llx \n" , rsr_out , mmio_rr_log->mmio_phys_addr );
-
-		
+		break;
+	}
+	case KVM_RR_MMIO_OUT: {
+		struct kvm_rr_mmio_out *mmio_rr_log;
+		mmio_rr_log = data;
+		printk( "VCPU %d :", vcpu->vcpu_id );
+		printk("MMIO OUT, time_stamp= %llu \n", mmio_rr_log->time_stamp);
 		break;
 	}
 	case KVM_RR_EXT_INT: {

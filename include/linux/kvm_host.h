@@ -310,7 +310,8 @@ struct kvm_vcpu {
 	u8 output_counting;
 	//rsr end
 	
-	u8 is_replaying;
+	//u8 is_recording;		//replaced by kvm_record
+	u8 is_replaying;		//should be replaced by kvm_replay
 	// recoding time stamps
 	struct kvm_rr_ts rr_ts;
 	//struct file *log_file;
@@ -343,8 +344,8 @@ struct kvm_vcpu {
 	// one common wait queue	
 	wait_queue_head_t irq_wait;
 	atomic_t irq_counts[KVM_NR_INTERRUPTS]; 
-	// for network pkts recording
-	struct kvm_rr_pkts *pending_reqs;
+	//1 for network pkts recording
+	 struct kvm_rr_pkts *pending_reqs;
 	// take this lock before altering
 	// the list of pending_reqs
 	spinlock_t pending_reqs_lock;	 
@@ -1123,6 +1124,9 @@ extern bool kvm_rebooting;
 
 // XELATEX
 extern bool kvm_record;
+//edit by rsr
+extern atomic64_t g_time_stamp; 
+//end rsr
 extern int kvm_record_type;
 extern int kvm_record_mode;
 extern u32 kvm_record_timer_value;

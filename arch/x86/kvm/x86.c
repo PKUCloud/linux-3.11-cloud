@@ -4373,32 +4373,44 @@ static int kernel_pio(struct kvm_vcpu *vcpu, void *pd)
 
 // kvm rr
 //record all the Port based IO events, will be called in function "emulator_pio_in_emulated"
-int kvm_rr_pio_handle(struct kvm_vcpu *vcpu)
+int kvm_rr_pio_handle(struct kvm_vcpu *vcpu, bool in)
 {
 	//pio_rr_log.count = vcpu->arch.pio.count;
 	//pio_rr_log.port = vcpu->arch.pio.port;
 	//pio_rr_log.size = vcpu->arch.pio.size;
-	if (vcpu->is_recording) {
-		struct kvm_rr_pio_in pio_rr_log;
-		if ((vcpu->arch.pio.count * vcpu->arch.pio.size) > KVM_RR_PIO_DATA_MAX) {
-			kvm_debug("error... data size of pio out of one page size! \n");
-			vcpu->is_recording = 0;
-			return 0;
+	if (kvm_record) {
+		if (in) {
+			struct kvm_rr_pio_in pio_rr_log;
+			if ((vcpu->arch.pio.count * vcpu->arch.pio.size) > KVM_RR_PIO_DATA_MAX) {
+				kvm_debug("error... data size of pio out of one page size! \n");
+				return 0;
+			}
+
+			memcpy(pio_rr_log.data,vcpu->arch.pio_data, \
+					vcpu->arch.pio.count * vcpu->arch.pio.size);
+
+			pio_rr_log.rec_type = KVM_RR_PIO_IN;
+			//increase global time stamp first, so it begin from 1
+			pio_rr_log.time_stamp = atomic64_inc_return(&g_time_stamp);
+			
+			write_log(KVM_RR_PIO_IN, vcpu,\
+				sizeof(pio_rr_log) - (PAGE_SIZE - (vcpu->arch.pio.count * vcpu->arch.pio.size)), \
+				(void *)&pio_rr_log);
+			// reset counter to zero .. next event is relative 
+			// from here
+			vcpu->rr_ts.br_count = 0;
+			// record pending pkts, deal with it later
+			// kvm_rr_rec_reqs(vcpu);
 		}
+		else {
+			struct kvm_rr_pio_out pio_rr_log;
+			pio_rr_log.rec_type = KVM_RR_PIO_OUT;
+			//increase global time stamp first, so it begin from 1
+			pio_rr_log.time_stamp = atomic64_inc_return(&g_time_stamp);
+			
+			write_log(KVM_RR_PIO_OUT, vcpu, sizeof(pio_rr_log), (void *)&pio_rr_log);
 
-		memcpy(pio_rr_log.data,vcpu->arch.pio_data, \
-				vcpu->arch.pio.count * vcpu->arch.pio.size);
-
-		pio_rr_log.rec_type = KVM_RR_PIO_IN;
-		write_log(KVM_RR_PIO_IN,vcpu,\
-			sizeof(pio_rr_log) - (PAGE_SIZE - (vcpu->arch.pio.count * vcpu->arch.pio.size)), \
-						(void *)&pio_rr_log);
-		// reset counter to zero .. next event is relative 
-		// from here
-		vcpu->rr_ts.br_count = 0;
-		
-		// record pending pkts, deal with it later
-		// kvm_rr_rec_reqs(vcpu);
+		}
 		
 	}// end of recording 
 
@@ -4495,9 +4507,9 @@ static int emulator_pio_in_emulated(struct x86_emulate_ctxt *ctxt,
 	if (ret) {
 data_avail:
 		// kvm rr
-		// record the data which is presented by kernel instead of 
+		// record the data(IN) which is presented by kernel instead of 
 		// user space;
-		kvm_rr_pio_handle(vcpu);
+		kvm_rr_pio_handle(vcpu,1);
 		// end kvm rr 
 		memcpy(val, vcpu->arch.pio_data, size * count);
 		vcpu->arch.pio.count = 0;
@@ -4512,6 +4524,12 @@ static int emulator_pio_out_emulated(struct x86_emulate_ctxt *ctxt,
 				     const void *val, unsigned int count)
 {
 	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
+
+	// kvm rr
+	// record the data(OUT) which is presented by kernel instead of 
+	// user space;
+	kvm_rr_pio_handle(vcpu,0);
+	// end kvm rr 
 
 	memcpy(vcpu->arch.pio_data, val, size * count);
 	return emulator_pio_in_out(vcpu, size, port, (void *)val, count, false);
@@ -6121,54 +6139,58 @@ static int complete_emulated_pio(struct kvm_vcpu *vcpu)
 
 // kvm rr
 //record all the Memory mapped IO events
-kvm_rr_mmio_handle(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run , unsigned len )
+kvm_rr_mmio_handle(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run ,
+		unsigned len, bool in)
 {
-
-	if(vcpu->is_recording)
-	{
-		struct kvm_rr_mmio_in mmio_rr_log;
-		mmio_rr_log.mmio_phys_addr = kvm_run->mmio.phys_addr ;
-		memset( mmio_rr_log.data , 0 , 8 );
-		memcpy(mmio_rr_log.data, kvm_run->mmio.data, kvm_run->mmio.len );
-		mmio_rr_log.data[kvm_run->mmio.len] = 0;
-		mmio_rr_log.rec_type = KVM_RR_MMIO_IN;
-		write_log(KVM_RR_MMIO_IN, vcpu, sizeof(mmio_rr_log), \
-				(void *)(&mmio_rr_log));
-		// reset counter to zero .. next event is relative 
-		// from here
-		vcpu->rr_ts.br_count = 0;
-	
-		// record pending pkts, deal with it later
-		//kvm_rr_rec_reqs(vcpu);
+	if (kvm_record) {
+		if (in) {
+			struct kvm_rr_mmio_in mmio_rr_log;
+			mmio_rr_log.mmio_phys_addr = kvm_run->mmio.phys_addr ;
+			memset( mmio_rr_log.data , 0 , 8 );
+			memcpy(mmio_rr_log.data, kvm_run->mmio.data, kvm_run->mmio.len );
+			mmio_rr_log.data[kvm_run->mmio.len] = 0;
+			mmio_rr_log.rec_type = KVM_RR_MMIO_IN;
+			mmio_rr_log.time_stamp = atomic64_inc_return(&g_time_stamp);
+			write_log(KVM_RR_MMIO_IN, vcpu, sizeof(mmio_rr_log), \
+					(void *)(&mmio_rr_log));
+			// reset counter to zero .. next event is relative 
+			// from here
+			vcpu->rr_ts.br_count = 0;
+		
+			// record pending pkts, deal with it later
+			//kvm_rr_rec_reqs(vcpu);
+		}
+		else {
+			struct kvm_rr_mmio_out mmio_rr_log;
+			mmio_rr_log.rec_type = KVM_RR_MMIO_OUT;
+			mmio_rr_log.time_stamp = atomic64_inc_return(&g_time_stamp);
+			write_log(KVM_RR_MMIO_OUT, vcpu, sizeof(mmio_rr_log), \
+					(void *)(&mmio_rr_log));
+		}
 	}// end of recording 
 	
 	//To be continue...
 	/*	
-	else if(vcpu->is_replaying)
-	{
+	else if (vcpu->is_replaying) {
 		struct kvm_rr_mmio_in *mmio_rr_log = NULL;
 		int ret;
 		ret = read_log(vcpu);	
-		if(ret <= 0 || ret != KVM_RR_MMIO_IN)
-		{
+		if(ret <= 0 || ret != KVM_RR_MMIO_IN) {
 			// disable replaying , undefined behavior
 			kvm_err("is out of sync %d expecting KVM_RR_MMIO_IN, \
 				got %d\n", ret != KVM_RR_MMIO_IN,ret);
 			vcpu_disable_rply(vcpu);
                 }
-		else
-		{
+		else {
 			// just copy the input data from log file
 			mmio_rr_log = get_log_data_ptr(vcpu);
 		}
-		if(!mmio_rr_log)
-		{
+		if(!mmio_rr_log) {
 			// disable replaying , undefined behavior
 			kvm_err("couldn't get data ptr\n");
 			vcpu_disable_rply(vcpu);
 		}
-		else
-		{
+		else {
 			vcpu->next_rec_type = mmio_rr_log->next_rec_type;
 
 			// copy to the place where user space would have
@@ -6238,14 +6260,18 @@ static int complete_emulated_mmio(struct kvm_vcpu *vcpu)
 	frag = &vcpu->mmio_fragments[vcpu->mmio_cur_fragment];
 	len = min(8u, frag->len);
 	//1 mmio read : Complete previous one
-	if (!vcpu->mmio_is_write){		
+	if (!vcpu->mmio_is_write) {		
 		memcpy(frag->data, run->mmio.data, len);
-
 		//edit by rsr , log all mmio events 
-		kvm_rr_mmio_handle( vcpu,run,len );
-		//end rsr
+		kvm_rr_mmio_handle(vcpu, run, len, 1);	//mmio in
+		
 	
 	}
+	else {
+		kvm_rr_mmio_handle(vcpu, run, len, 0);	//mmio out
+	}
+	//end rsr
+	
 	if (frag->len <= 8) {
 		/* Switch to the next fragment. */
 		frag++;
@@ -6301,19 +6327,6 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 			goto out;
 		}
 	}
-
-	//edit by rsr
-	struct kvm_mmio_fragment *frag = &vcpu->mmio_fragments[vcpu->mmio_cur_fragment];
-	unsigned len = min(8u, frag->len);	
-	if (!vcpu->mmio_is_write && vcpu->mmio_needed) {
-		printk( "-------------------------------------------\n" );
-		kvm_rr_mmio_handle( vcpu, vcpu->run, len );
-	}
-	
-	//end rsr
-
-	
-
 	if (unlikely(vcpu->arch.complete_userspace_io)) {
 		int (*cui)(struct kvm_vcpu *) = vcpu->arch.complete_userspace_io;
 		vcpu->arch.complete_userspace_io = NULL;
