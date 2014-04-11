@@ -122,6 +122,18 @@ out:
 			return -EFAULT;
 		}
 		*f_pos += ret;	/* does the delta have to be the same as ret? */
+	}else if(ret == 0) {
+		/* eof
+		 * all the data has been flushed out
+		 * we need to reactive all the vcpu_quantums to receive next new data
+		 */
+		int i;
+		for(i = 0; i < MAX_VCPU; ++i) {
+			vq = &dev->quantums[i];
+			spin_lock(&vq->vcpu_lock);
+			vq->active = 1;
+			spin_unlock(&vq->vcpu_lock);
+		}
 	}
 	return ret;
 }
@@ -161,6 +173,15 @@ long logger_ioctl(struct file *filp,
 	case LOGGER_FLUSH:
 		if(kvm_record)
 			return -EPERM;	/* operation not permitted */
+		/* must first inactive all the vcpu_quantums to ensure that none are
+		 * modifying the state of the vcpu_quantums
+		 */
+		for(i = 0; i < MAX_VCPU; ++i) {
+			vq = &dev->quantums[i];
+			spin_lock(&vq->vcpu_lock);
+			vq->active = 0;
+			spin_unlock(&vq->vcpu_lock);
+		}
 		spin_lock(&dev->dev_lock);
 		dev->state = FLUSHED;
 		for(i = 0; i < MAX_VCPU; ++i) {
@@ -169,7 +190,10 @@ long logger_ioctl(struct file *filp,
 				assert(vq->head == vq->tail && vq->vcpu_id == vq->head->vcpu_id);
 				size = vq->str - (char*)(vq->head->data);
 				if(size > 0) {
-					/* move it to the out_list */
+					/* move it to the out_list
+					 * because we have set all the vcpu_quantums inactive before,
+					 * we can now modify the vcpu_quantums freely and safely
+					 */
 					ptr = vq->head;
 					assert(ptr->next == NULL);
 					vq->head = vq->tail = NULL;
@@ -342,6 +366,8 @@ static void logger_dev_init(struct logger_dev *dev)
 
 		for(i = 0; i < MAX_VCPU; ++i) {
 			dev->quantums[i].vcpu_id = i;
+			spin_lock_init(&dev->quantums[i].vcpu_lock);	/* here init all vcpu_quantums's vcpu_lock */
+			dev->quantums[i].active = 1;
 		}
 	}
 }
@@ -1429,16 +1455,18 @@ static int __print_record(struct vcpu_quantum *vq, const char* fmt, va_list args
 int print_record(int vcpu_id, const char *fmt, ...)
 {
 	va_list args;  
-	int r; 
+	int r = 0; 
+	struct vcpu_quantum *vq;
 
-	if(unlikely(logger_dev.state != NORMAL))
-		return 0;
-
-	va_start(args, fmt);
-
-	r = __print_record(&logger_dev.quantums[vcpu_id], fmt, args);
-
-	va_end(args);
+	vq = &logger_dev.quantums[vcpu_id];
+	
+	spin_lock(&vq->vcpu_lock);
+	if(likely(vq->active)) {
+		va_start(args, fmt);
+		r = __print_record(vq, fmt, args);
+		va_end(args);
+	}
+	spin_unlock(&vq->vcpu_lock);
 	return r;   
 }
 EXPORT_SYMBOL_GPL(print_record);

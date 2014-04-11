@@ -37,6 +37,13 @@ struct vcpu_quantum {
 	*/
 	struct logger_quantum *head;	/* the head of the quantums of this vcpu */
 	struct logger_quantum *tail;	/* the tail of the quantums of this vcpu */
+	int active;	/* whether this vcpu_quantum is active, only then is it allowed to store new info */
+	spinlock_t vcpu_lock;	/* the lock of the vcpu_quantum */
+	/* notice that if you want to hold the vcpu_lock and the dev_lock
+	 * you must first hold the vcpu_lock, then the dev_lock
+	 * because the print_record() will first hold the vcpu_lock, and then
+	 * maybe will hold the dev_lock
+	 */
 };
 
 
