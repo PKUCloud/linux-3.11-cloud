@@ -2348,12 +2348,12 @@ static long kvm_vm_ioctl(struct file *filp,
 		return -EIO;
 	switch (ioctl) {
 	case KVM_CREATE_VCPU:{ 		//this brace should be added here!!!
+		struct kvm_vcpu *rr_v;
+		int r_flag;
 		r = kvm_vm_ioctl_create_vcpu(kvm, arg);
 
 		//edit by rsr, just for debuging. Should be deleted later. !!!!!!!!!!!!
-
-		struct kvm_vcpu *rr_v;
-		int r_flag = -ENOTTY;
+		r_flag = -ENOTTY;
 		kvm_for_each_vcpu(r_flag,rr_v,kvm)
 		{
 			rr_v->rr_ts.br_count = 0;
@@ -2555,10 +2555,10 @@ static long kvm_vm_compat_ioctl(struct file *filp,
 		return -EIO;
 	switch (ioctl) {
 	case KVM_GET_DIRTY_LOG: {
-		printk( "<0>""13\n" );
-		
 		struct compat_kvm_dirty_log compat_log;
 		struct kvm_dirty_log log;
+
+		printk( "<0>""13\n" );
 
 		r = -EFAULT;
 		if (copy_from_user(&compat_log, (void __user *)arg,

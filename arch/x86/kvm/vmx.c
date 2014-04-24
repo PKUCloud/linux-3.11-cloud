@@ -27,7 +27,7 @@
 #include <asm/atomic.h>
 #include <linux/delay.h>
 #include <linux/wait.h>
-static int injected_ss; 
+//static int injected_ss; 
 // end kvm rr
 
 #include "cpuid.h"
@@ -4910,11 +4910,13 @@ static int handle_triple_fault(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
+/*
 // kvm rr
 static int handle_mtf(struct kvm_vcpu *vcpu)
 {	
 	return 1;
 }
+*/
 
 //use to record all results of RDTSC instruction
 static int handle_rdtsc(struct kvm_vcpu *vcpu)
@@ -7456,6 +7458,7 @@ static void vmx_cancel_injection(struct kvm_vcpu *vcpu)
 int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 {
 	u32 intr = 0 ;
+	u64 rip;
 	struct kvm_rr_ext_int *int_log = &vcpu->int_log;
 	if (kvm_record) {
 		intr = vmcs_read32(VM_ENTRY_INTR_INFO_FIELD);
@@ -7470,7 +7473,7 @@ int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 			// which will be updated later in user space before replay
 			// BUG don't use instruction pointer of VM Exit
 			// some one could have emulated an instruction thus changing the IP
-			u64 rip;
+
 			rip = kvm_rip_read(vcpu);
 			vcpu->rr_ts.rip = rip;
 			
@@ -7530,6 +7533,10 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	unsigned long debugctlmsr;
+	u32 cpu_based_vm_exec_ctl;
+	u64 guest_dbgctl;
+	u64 host_dbgctl;
+	u64 curr_br_count;
 
 	/* Record the guest's net vcpu time for enforced NMI injections. */
 	if (unlikely(!cpu_has_virtual_nmis() && vmx->soft_vnmi_blocked))
@@ -7572,7 +7579,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		config_msr_rr_state(&vmx->msr_autosave_rr);
 		
 		// config vmcs for rdtsc to generate a vm exit
-		u32 cpu_based_vm_exec_ctl = vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
+		cpu_based_vm_exec_ctl = vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
 		cpu_based_vm_exec_ctl |= CPU_BASED_RDTSC_EXITING;
 		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL, cpu_based_vm_exec_ctl);
 
@@ -7582,12 +7589,10 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 
 	// doesn't work in core 2 duo !
 	// disable branch counting on SMM mode 
-	u64 guest_dbgctl;
 	guest_dbgctl = vmcs_read64(GUEST_IA32_DEBUGCTL);
 	guest_dbgctl |= (1 << 14);
 	vmcs_write64(GUEST_IA32_DEBUGCTL, guest_dbgctl);
 
-	u64 host_dbgctl;
 	rdmsrl(MSR_IA32_DEBUGCTLMSR, host_dbgctl);
 	host_dbgctl |= (1 << 14);
 	wrmsrl(MSR_IA32_DEBUGCTLMSR, host_dbgctl);
@@ -7798,7 +7803,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//fill the tuple<rip, rcx, bc>
 	vcpu->rr_ts.rip = vmcs_readl(GUEST_RIP);
 	vcpu->rr_ts.rcx = vcpu->arch.regs[VCPU_REGS_RCX]; 
-	u64 curr_br_count = read_pmc1();
+	curr_br_count = read_pmc1();
 
 	if(kvm_record) {
 		vcpu->rr_ts.br_count += curr_br_count;

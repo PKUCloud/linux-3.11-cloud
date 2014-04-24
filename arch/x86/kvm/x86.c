@@ -4375,27 +4375,29 @@ static int kernel_pio(struct kvm_vcpu *vcpu, void *pd)
 //record all the Port based IO events, will be called in function "emulator_pio_in_emulated"
 int kvm_rr_pio_handle(struct kvm_vcpu *vcpu, bool in)
 {
+	struct kvm_rr_pio_in *pio_rr_log;
+
+	pio_rr_log = kmalloc(sizeof(struct kvm_rr_pio_in), GFP_KERNEL);
 	//pio_rr_log.count = vcpu->arch.pio.count;
 	//pio_rr_log.port = vcpu->arch.pio.port;
 	//pio_rr_log.size = vcpu->arch.pio.size;
 	if (kvm_record) {
 		if (in) {
-			struct kvm_rr_pio_in pio_rr_log;
 			if ((vcpu->arch.pio.count * vcpu->arch.pio.size) > KVM_RR_PIO_DATA_MAX) {
 				kvm_debug("error... data size of pio out of one page size! \n");
 				return 0;
 			}
 
-			memcpy(pio_rr_log.data,vcpu->arch.pio_data, \
+			memcpy(pio_rr_log->data, vcpu->arch.pio_data,
 					vcpu->arch.pio.count * vcpu->arch.pio.size);
 
-			pio_rr_log.rec_type = KVM_RR_PIO_IN;
+			pio_rr_log->rec_type = KVM_RR_PIO_IN;
 			//increase global time stamp first, so it begin from 1
-			pio_rr_log.time_stamp = atomic64_inc_return(&g_time_stamp);
+			pio_rr_log->time_stamp = atomic64_inc_return(&g_time_stamp);
 			
-			write_log(KVM_RR_PIO_IN, vcpu,\
-				sizeof(pio_rr_log) - (PAGE_SIZE - (vcpu->arch.pio.count * vcpu->arch.pio.size)), \
-				(void *)&pio_rr_log);
+			write_log(KVM_RR_PIO_IN, vcpu,
+				sizeof(struct kvm_rr_pio_in) - (PAGE_SIZE - (vcpu->arch.pio.count * vcpu->arch.pio.size)),
+				pio_rr_log);
 			// reset counter to zero .. next event is relative 
 			// from here
 			vcpu->rr_ts.br_count = 0;
@@ -4403,16 +4405,16 @@ int kvm_rr_pio_handle(struct kvm_vcpu *vcpu, bool in)
 			// kvm_rr_rec_reqs(vcpu);
 		}
 		else {
-			struct kvm_rr_pio_out pio_rr_log;
-			pio_rr_log.rec_type = KVM_RR_PIO_OUT;
+			pio_rr_log->rec_type = KVM_RR_PIO_OUT;
 			//increase global time stamp first, so it begin from 1
-			pio_rr_log.time_stamp = atomic64_inc_return(&g_time_stamp);
+			pio_rr_log->time_stamp = atomic64_inc_return(&g_time_stamp);
 			
-			write_log(KVM_RR_PIO_OUT, vcpu, sizeof(pio_rr_log), (void *)&pio_rr_log);
+			write_log(KVM_RR_PIO_OUT, vcpu, sizeof(struct kvm_rr_pio_in), pio_rr_log);
 
 		}
-		
 	}// end of recording 
+
+	kfree(pio_rr_log);
 
 // To be continue...
 /*	
@@ -6139,7 +6141,7 @@ static int complete_emulated_pio(struct kvm_vcpu *vcpu)
 
 // kvm rr
 //record all the Memory mapped IO events
-kvm_rr_mmio_handle(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run ,
+int kvm_rr_mmio_handle(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run ,
 		unsigned len, bool in)
 {
 	if (kvm_record) {
@@ -6205,11 +6207,12 @@ kvm_rr_mmio_handle(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run ,
 		}
 	}// end of replaying
 	*/
-
+	return 0;
 }
 // end kvm rr
 
 //edit by rsr
+/*
 static int print_mmio_fragments_for_debugging( struct kvm_vcpu *vcpu )
 {
 	char rsr[256];
@@ -6225,7 +6228,9 @@ static int print_mmio_fragments_for_debugging( struct kvm_vcpu *vcpu )
 				, i , rsr , vcpu->mmio_fragments[i].gpa , vcpu->mmio_fragments[i].len \
 				, vcpu->mmio_cur_fragment , vcpu->mmio_nr_fragments );
 	}
+	return 0;
 }
+*/
 //end rsr
 
 

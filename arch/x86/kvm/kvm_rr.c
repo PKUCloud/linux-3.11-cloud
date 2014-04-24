@@ -111,7 +111,7 @@ int config_msr_rr_state(struct msr_autosave_rr *msr_rr)
 	
 	// no change in KVM_RR_IA32_DEBUGCTL for now 
 	//
-	
+	return 0;
 
 }
 EXPORT_SYMBOL_GPL(config_msr_rr_state);
@@ -136,20 +136,19 @@ int inline check_ovf_bit_pmc1()
 u64 read_pmc1()
 {
 	unsigned eax =0x0;
-        unsigned edx =0x0;
-        unsigned msr_addr = KVM_RR_IA32_PMC1 ; //0x38f;
+	unsigned edx =0x0;
+	unsigned msr_addr = KVM_RR_IA32_PMC1 ; //0x38f;
+	unsigned long long result;
 
-        __asm__ __volatile__ ("mov %2, %%ecx\n\t"
-        "rdmsr\n\t"
-        "mov %%eax, %0\n\t"
-        "mov %%edx, %1\n\t"
-        : "=&r" (eax), "=&r" (edx)
-        : "r"(msr_addr)
-        : "eax", "ecx", "edx"); /* eax, ecx, edx clobbered */
+	__asm__ __volatile__ ("mov %2, %%ecx\n\t"
+		"rdmsr\n\t"
+		"mov %%eax, %0\n\t"
+		"mov %%edx, %1\n\t"
+		: "=&r" (eax), "=&r" (edx)
+		: "r"(msr_addr)
+		: "eax", "ecx", "edx"); /* eax, ecx, edx clobbered */
 
-
-
-        unsigned long long result = ((unsigned long long)edx << 32) | eax;
+	result = ((unsigned long long)edx << 32) | eax;
 	return result;
 }
 EXPORT_SYMBOL_GPL(read_pmc1);
@@ -164,9 +163,9 @@ void save_host_msr_rr_state(struct msr_autosave_rr *msr_rr)
 	int i;
 	for(i=0; i<KVM_RR_NR_MSRS; i++)
 	{
+		//kvm_debug(" msr addr %x val %llx \n",rr_msr_map[i],
+		//		msr_rr->exit_load_host[i].value);
 		rdmsrl(rr_msr_map[i],msr_rr->exit_load_host[i].value);	
-		//kvm_debug(" msr addr %x val %llx \n",rr_msr_map[i],\
-				msr_rr->exit_load_host[i].value);
 	}
 
 }
@@ -220,12 +219,12 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 		offset = offset_in_page(req->gpa);
 
 		if(req->req_type == REC_TYPE_RX_PKT) {
-			rfd_sts = hva+offset;
+			rfd_sts = (unsigned int *)(hva+offset);
 			*rfd_sts = (*rfd_sts | (1<<15));
 			kvm_debug("rfd_sts %x\n",*rfd_sts);
 		}
 
-		memcpy(req_log->data, hva+offset, req_log->size);
+		memcpy(req_log->data, (void *)(hva+offset), req_log->size);
 			
 		write_log(KVM_RR_REQ, vcpu, (sizeof(struct kvm_rr_req) - (KVM_RR_REQ_MAX - req->size)), (void *)req_log);
 		kfree(req_log);
@@ -275,7 +274,7 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 
 	}// end of replay	
 	*/
-	
+	return 0;
 }
 
 // this function will write the pending pkts to log file
@@ -302,7 +301,7 @@ int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu)
 	// in the next iteration.
 	spin_lock(&vcpu->pending_reqs_lock);
 	
-	list = vcpu->pending_reqs;
+	list = (struct kvm_rr_reqs_list *)(vcpu->pending_reqs);
 	vcpu->pending_reqs = NULL;
 	
 	spin_unlock(&vcpu->pending_reqs_lock);
@@ -312,11 +311,11 @@ int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu)
 		kvm_rr_req_handle(vcpu, list);
 		temp = list;
 		list = temp->next;
-		kvm_debug("removing reqs from peding list %x\n",temp);
+		kvm_debug("removing reqs from peding list %llx\n", (u64)temp);
 		kfree(temp);
 
 	}	
-
+	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_rr_rec_reqs);
 
@@ -460,14 +459,13 @@ EXPORT_SYMBOL_GPL(read_log);
 int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len, 
 				void *data )
 {
+	//struct kvm_rr_ts *ts = &vcpu->rr_ts;
+	//size_t count = KVM_RR_LOG_SIZE(data_len);
+	//int ret;
+	//int offset = 0,fil_size;
+	//int flag=0;
 
-	struct kvm_rr_ts *ts = &vcpu->rr_ts;
-	size_t count = KVM_RR_LOG_SIZE(data_len);
-	int ret;
-	int offset = 0,fil_size;
-	int flag=0;
-
-	struct kvm_run *run=vcpu->run;
+	//struct kvm_run *run=vcpu->run;
 
 	if(!kvm_record)	
 		return 1;
@@ -496,8 +494,8 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 		pio_rr_log->data[ vcpu->arch.pio.count * vcpu->arch.pio.size ] = '\0';
 		printk( "VCPU %d :", vcpu->vcpu_id );
 		printk( "PIO IN: " \
-				"data length: %d, " \
-				"end position: %d, " \
+				"data length: %u, " \
+				"end position: %lu, " \
 				"data(pio): %s, " \
 				"time_stamp= %llu" \
 				"\n", data_len, vcpu->arch.pio.count * vcpu->arch.pio.size, pio_rr_log->data , pio_rr_log->time_stamp); 
@@ -514,8 +512,8 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 	case KVM_RR_MMIO_IN: {
 		
 		struct kvm_rr_mmio_in *mmio_rr_log;
-		mmio_rr_log = data;
 		char rsr_out[9];
+		mmio_rr_log = data;
 		memset( rsr_out , 0 , 9 );
 		memcpy( rsr_out , mmio_rr_log->data , 8 );
 		rsr_out[8] = 0;

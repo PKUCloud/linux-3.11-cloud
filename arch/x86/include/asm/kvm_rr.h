@@ -13,6 +13,7 @@
 #include <linux/syscalls.h>
 #include <linux/kvm_types.h>
 #include <linux/kvm.h>
+//#include <linux/kvm_host.h>
 
 
 
@@ -24,7 +25,7 @@
 
 #define DBG_NUM_RECS 1000000
 
-
+/*
 #define kvm_debug(...) do{ \
 	if(KVM_DEBUG_ON && vcpu->num_recs > DBG_NUM_RECS) printk(KERN_ALERT __VA_ARGS__); \
 	} while(0)  
@@ -35,7 +36,7 @@
 #define kvm_err(...) do{\
 	if(KVM_ERR_ON) printk(KERN_ALERT __VA_ARGS__); \
 	} while(0)
-
+*/
 
 #define KVM_RR_NR_MSRS 2
 
@@ -289,7 +290,7 @@ char * print_u64_raw(void * raw);
 
 int is_kvm_rr_msr(u32 msr);
 
-u64 read_pmc1();
+u64 read_pmc1(void);
 
 void init_kvm_rr_msr(struct msr_autosave_rr *msr_rr);
 
@@ -299,9 +300,9 @@ void save_host_msr_rr_state(struct msr_autosave_rr *msr_rr);
 
 void copy_guest_store_to_load(struct msr_autosave_rr *msr_rr);
 
-void inline clear_ovf_bit_pmc1();
+void inline clear_ovf_bit_pmc1(void);
 
-int inline check_ovf_bit_pmc1();
+int inline check_ovf_bit_pmc1(void);
 
 int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu);
 
