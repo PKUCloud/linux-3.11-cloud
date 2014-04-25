@@ -5871,7 +5871,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 		kvm->timestamp ++;
 
 		mutex_lock(&(kvm->tm_lock));
-		if (!(kvm->timestamp % 1000))
+		//if (!(kvm->timestamp % 1000))
 			print_record("XELATEX - vcpu=%d, timestamp=%llu =================\n",
 					vcpu->vcpu_id, kvm->timestamp);
 
@@ -5905,6 +5905,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu)
 		kvm_mmu_unload(vcpu);
 		//kvm_record_count = KVM_RECORD_COUNT - 1;
 		vcpu->is_recording = true;
+		print_record("XELATEX - first preemption\n");
 	}
 
 	// Reset bitmaps
@@ -7458,7 +7459,6 @@ static void vmx_cancel_injection(struct kvm_vcpu *vcpu)
 int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 {
 	u32 intr = 0 ;
-	u64 rip;
 	struct kvm_rr_ext_int *int_log = &vcpu->int_log;
 	if (kvm_record) {
 		intr = vmcs_read32(VM_ENTRY_INTR_INFO_FIELD);
@@ -7466,7 +7466,7 @@ int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 			((intr & INTR_INFO_INTR_TYPE_MASK) == INTR_TYPE_EXT_INTR))
 		{
 			int_log->int_vec = intr & INTR_INFO_VECTOR_MASK;
-			//int_log->is_realmode = 0;
+			// TODO: Useless 1 line(s)
 			int_log->irq_count = atomic_read(&vcpu->irq_counts[int_log->int_vec]);	//used to synchronize DMA
 
 			// we can't predict the next br, so give it enough space
@@ -7474,8 +7474,7 @@ int kvm_rr_irq_handle(struct kvm_vcpu *vcpu)
 			// BUG don't use instruction pointer of VM Exit
 			// some one could have emulated an instruction thus changing the IP
 
-			rip = kvm_rip_read(vcpu);
-			vcpu->rr_ts.rip = rip;
+			vcpu->rr_ts.rip = kvm_rip_read(vcpu);
 			
 			// we can't use ecx at exit as a reference, because last may differ
 			// between successful injection during recording and replaying
@@ -7582,11 +7581,11 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		cpu_based_vm_exec_ctl = vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
 		cpu_based_vm_exec_ctl |= CPU_BASED_RDTSC_EXITING;
 		vmcs_write32(CPU_BASED_VM_EXEC_CONTROL, cpu_based_vm_exec_ctl);
-
 	}
 	save_host_msr_rr_state(&vmx->msr_autosave_rr);
 	copy_guest_store_to_load(&vmx->msr_autosave_rr);
 
+	// TODO: Don't know the meaning
 	// doesn't work in core 2 duo !
 	// disable branch counting on SMM mode 
 	guest_dbgctl = vmcs_read64(GUEST_IA32_DEBUGCTL);
@@ -7596,10 +7595,12 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	rdmsrl(MSR_IA32_DEBUGCTLMSR, host_dbgctl);
 	host_dbgctl |= (1 << 14);
 	wrmsrl(MSR_IA32_DEBUGCTLMSR, host_dbgctl);
+	// TODO: Until here
 
 	if (kvm_record) {
 		// disable all counters and reset the counter 2 
 		// to zero at host. 
+		// TODO: Meanings of following 2 lines?
 		wrmsrl(rr_msr_map[KVM_RR_IA32_PERF_GLOBAL_CTRL_IDX],(u64)0);
 		wrmsrl(rr_msr_map[KVM_RR_IA32_PMC1_IDX], (u64)0);
 		kvm_rr_irq_handle(vcpu);	
@@ -7777,9 +7778,9 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	//int_i = vmcs_read32(VM_ENTRY_INTR_INFO_FIELD);
 	//kvm_debug("v %d t %d v %d %x\n",int_i & 0xff, (int_i >> 8) & 0x7, (int_i >> 31) &1 ,vmcs_read32(GUEST_INTERRUPTIBILITY_INFO));
 
-
 	// DONOT DELETE 
 	//check if this interrupt was injected success?
+	// TODO: Duplicate code
 	vmx->idt_vectoring_info = vmcs_read32(IDT_VECTORING_INFO_FIELD);
 
 	if (kvm_record && vcpu->int_log.int_vec && !vmx->idt_vectoring_info) {

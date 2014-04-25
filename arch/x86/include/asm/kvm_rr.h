@@ -212,7 +212,6 @@ struct kvm_rr_ext_int
 {
 	u8 rec_type; 
 	u8 int_vec;
-	//u8 is_realmode;
 	u8 irq;
 	u32 irq_count;
 	struct kvm_rr_ts next_ts;

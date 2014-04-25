@@ -2347,23 +2347,9 @@ static long kvm_vm_ioctl(struct file *filp,
 	if (kvm->mm != current->mm)
 		return -EIO;
 	switch (ioctl) {
-	case KVM_CREATE_VCPU:{ 		//this brace should be added here!!!
-		struct kvm_vcpu *rr_v;
-		int r_flag;
+	case KVM_CREATE_VCPU:
 		r = kvm_vm_ioctl_create_vcpu(kvm, arg);
-
-		//edit by rsr, just for debuging. Should be deleted later. !!!!!!!!!!!!
-		r_flag = -ENOTTY;
-		kvm_for_each_vcpu(r_flag,rr_v,kvm)
-		{
-			rr_v->rr_ts.br_count = 0;
-			rr_v->output_counting = 0;	
-		
-		}
-		//rsr end
-		
 		break;
-	}
 	case KVM_SET_USER_MEMORY_REGION: {
 		struct kvm_userspace_memory_region kvm_userspace_mem;
 

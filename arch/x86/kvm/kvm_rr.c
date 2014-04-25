@@ -218,11 +218,12 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 		hva = gfn_to_hva(vcpu->kvm, gfn);
 		offset = offset_in_page(req->gpa);
 
-		if(req->req_type == REC_TYPE_RX_PKT) {
-			rfd_sts = (unsigned int *)(hva+offset);
-			*rfd_sts = (*rfd_sts | (1<<15));
-			kvm_debug("rfd_sts %x\n",*rfd_sts);
-		}
+		// TODO: Never reach here
+//		if(req->req_type == REC_TYPE_RX_PKT) {
+//			rfd_sts = (unsigned int *)(hva+offset);
+//			*rfd_sts = (*rfd_sts | (1<<15));
+//			kvm_debug("rfd_sts %x\n",*rfd_sts);
+//		}
 
 		memcpy(req_log->data, (void *)(hva+offset), req_log->size);
 			
@@ -277,9 +278,11 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 	return 0;
 }
 
+// TODO: Useless
 // this function will write the pending pkts to log file
 // and set the COMPLETE_BIT on rfd. And also free the pending pkts
 // data structure
+/*
 int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu)
 {
 		
@@ -318,7 +321,7 @@ int kvm_rr_rec_reqs(struct kvm_vcpu *vcpu)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_rr_rec_reqs);
-
+*/
 
 /*
 int kvm_rr_rply_reqs(struct kvm_vcpu *vcpu)
@@ -518,7 +521,7 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 		memcpy( rsr_out , mmio_rr_log->data , 8 );
 		rsr_out[8] = 0;
 		printk( "VCPU %d :", vcpu->vcpu_id );
-		printk( "MMIO IN, Data: %s  | " \
+		printk( "MMIO IN, Data: %s  | "
 				"Address: 0x%llx time_stamp= %llu \n" , rsr_out , mmio_rr_log->mmio_phys_addr, mmio_rr_log->time_stamp);
 		
 		break;

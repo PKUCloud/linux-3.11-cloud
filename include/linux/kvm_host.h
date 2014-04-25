@@ -340,14 +340,14 @@ struct kvm_vcpu {
 	//u8 next_rec_type;
 	u8 is_next_rec_intr;
 	u64 num_recs;
-	u32 exit_reason;
-	// one common wait queue	
+	//u32 exit_reason;
+	// one common wait queue
+	// TODO: Useless
 	wait_queue_head_t irq_wait;
 	atomic_t irq_counts[KVM_NR_INTERRUPTS]; 
-	//1 for network pkts recording
-	 struct kvm_rr_pkts *pending_reqs;
 	// take this lock before altering
 	// the list of pending_reqs
+	// TODO: Useless
 	spinlock_t pending_reqs_lock;	 
 	// end kvm rr
 };

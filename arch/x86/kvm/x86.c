@@ -4409,7 +4409,7 @@ int kvm_rr_pio_handle(struct kvm_vcpu *vcpu, bool in)
 			//increase global time stamp first, so it begin from 1
 			pio_rr_log->time_stamp = atomic64_inc_return(&g_time_stamp);
 			
-			write_log(KVM_RR_PIO_OUT, vcpu, sizeof(struct kvm_rr_pio_in), pio_rr_log);
+			write_log(KVM_RR_PIO_OUT, vcpu, sizeof(struct kvm_rr_pio_out), pio_rr_log);
 
 		}
 	}// end of recording 
@@ -7059,6 +7059,8 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+	vcpu->rr_ts.br_count = 0;
+	vcpu->output_counting = 0;	
 
 	return 0;
 fail_free_wbinvd_dirty_mask:

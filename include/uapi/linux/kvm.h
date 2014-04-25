@@ -176,13 +176,6 @@ struct kvm_pit_config {
 #define KVM_EXIT_S390_TSCH        22
 #define KVM_EXIT_EPR              23
 
-// kvm rr
-#define KVM_EXIT_FILE_OP_REQ_MASK	(1<<17)
-#define KVM_RR_RING_BUF_SIZE 5
-#define KVM_MAX_LOG_SIZE (1<<20) 
-// end kvm rr
-
-
 /* For KVM_EXIT_INTERNAL_ERROR */
 /* Emulate instruction failed. */
 #define KVM_INTERNAL_ERROR_EMULATION	1
@@ -329,22 +322,6 @@ struct kvm_run {
 		struct kvm_sync_regs regs;
 		char padding[1024];
 	} s;
-
-	/*
-	// kvm rr
-	// this is for user space to identify 
-	// KVM is state
-	__u8 is_replaying;
-	// buffer pointer for user space
-	__u32 ring_buf_user_ptr;
-	// buffer pointer for kvm
-	__u32 ring_buf_kvm_ptr;
-	__u8 used_buffers;
-	char *ring_buffers[KVM_RR_RING_BUF_SIZE];
-	__u64 log_offset;
-	__u8 invalid_exit_reason;
-	// end kvm rr
-	*/
 };
 
 /* for KVM_REGISTER_COALESCED_MMIO / KVM_UNREGISTER_COALESCED_MMIO */
@@ -1042,42 +1019,6 @@ struct kvm_s390_ucas_mapping {
 #define KVM_KVMCLOCK_CTRL	  _IO(KVMIO,   0xad)
 #define KVM_ARM_VCPU_INIT	  _IOW(KVMIO,  0xae, struct kvm_vcpu_init)
 #define KVM_GET_REG_LIST	  _IOWR(KVMIO, 0xb0, struct kvm_reg_list)
-
-// kvm rr
-
-
-#define REC_TYPE_RX_PKT 1
-#define REC_TYPE_NW_STAT 2
-
-struct kvm_rr_rec_request
-{
-	__u64 gpa; // including pkt buffer - gpa
-	__u32 size;
-	__u8 req_type;
-	// complete bit offset will be hard coded
-};
-
-
-struct kvm_irq
-{
-	__u32 irq;
-};
-
-#define KVM_ENABLE_RR _IO(KVMIO, 0xa8) 
-
-#define KVM_DISABLE_RR _IO(KVMIO, 0xa9)
-
-#define KVM_ENABLE_RPLY _IO(KVMIO, 0xaa)
-
-#define KVM_DISABLE_RPLY _IO(KVMIO, 0xab)
-
-#define KVM_RR_REC_REQUEST _IOW(KVMIO, 0xac, struct kvm_rr_rec_request)
-
-#define KVM_RR_INCR_IRQ_COUNT _IOW(KVMIO, 0xad, struct kvm_irq)
-
-
-// end kvm rr
-
 
 #define KVM_DEV_ASSIGN_ENABLE_IOMMU	(1 << 0)
 #define KVM_DEV_ASSIGN_PCI_2_3		(1 << 1)
