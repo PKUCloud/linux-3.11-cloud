@@ -4375,46 +4375,50 @@ static int kernel_pio(struct kvm_vcpu *vcpu, void *pd)
 //record all the Port based IO events, will be called in function "emulator_pio_in_emulated"
 int kvm_rr_pio_handle(struct kvm_vcpu *vcpu, bool in)
 {
-	struct kvm_rr_pio_in *pio_rr_log;
-
-	pio_rr_log = kmalloc(sizeof(struct kvm_rr_pio_in), GFP_KERNEL);
 	//pio_rr_log.count = vcpu->arch.pio.count;
 	//pio_rr_log.port = vcpu->arch.pio.port;
 	//pio_rr_log.size = vcpu->arch.pio.size;
 	if (kvm_record) {
 		if (in) {
+			struct kvm_rr_pio_in *pio_rr_in_log;
+
 			if ((vcpu->arch.pio.count * vcpu->arch.pio.size) > KVM_RR_PIO_DATA_MAX) {
 				kvm_debug("error... data size of pio out of one page size! \n");
 				return 0;
 			}
 
-			memcpy(pio_rr_log->data, vcpu->arch.pio_data,
+			pio_rr_in_log = kmalloc(sizeof(struct kvm_rr_pio_in), GFP_KERNEL);
+
+			memcpy(pio_rr_in_log->data, vcpu->arch.pio_data,
 					vcpu->arch.pio.count * vcpu->arch.pio.size);
 
-			pio_rr_log->rec_type = KVM_RR_PIO_IN;
+			pio_rr_in_log->rec_type = KVM_RR_PIO_IN;
 			//increase global time stamp first, so it begin from 1
-			pio_rr_log->time_stamp = atomic64_inc_return(&g_time_stamp);
+			pio_rr_in_log->time_stamp = atomic64_inc_return(&g_time_stamp);
 			
 			write_log(KVM_RR_PIO_IN, vcpu,
 				sizeof(struct kvm_rr_pio_in) - (PAGE_SIZE - (vcpu->arch.pio.count * vcpu->arch.pio.size)),
-				pio_rr_log);
+				pio_rr_in_log);
 			// reset counter to zero .. next event is relative 
 			// from here
 			vcpu->rr_ts.br_count = 0;
 			// record pending pkts, deal with it later
 			// kvm_rr_rec_reqs(vcpu);
+			kfree(pio_rr_in_log);
 		}
 		else {
-			pio_rr_log->rec_type = KVM_RR_PIO_OUT;
-			//increase global time stamp first, so it begin from 1
-			pio_rr_log->time_stamp = atomic64_inc_return(&g_time_stamp);
-			
-			write_log(KVM_RR_PIO_OUT, vcpu, sizeof(struct kvm_rr_pio_out), pio_rr_log);
+			struct kvm_rr_pio_out *pio_rr_out_log;
 
+			pio_rr_out_log = kmalloc(sizeof(struct kvm_rr_pio_out), GFP_KERNEL);
+
+			pio_rr_out_log->rec_type = KVM_RR_PIO_OUT;
+			//increase global time stamp first, so it begin from 1
+			pio_rr_out_log->time_stamp = atomic64_inc_return(&g_time_stamp);
+			
+			write_log(KVM_RR_PIO_OUT, vcpu, sizeof(struct kvm_rr_pio_out), pio_rr_out_log);
+			kfree(pio_rr_out_log);
 		}
 	}// end of recording 
-
-	kfree(pio_rr_log);
 
 // To be continue...
 /*	

@@ -4925,8 +4925,9 @@ static int handle_rdtsc(struct kvm_vcpu *vcpu)
 	// later
 
 	struct kvm_rr_rdtsc rdtsc_rr_log;	
-	u32 rax,rdx;
+	unsigned long rax,rdx;
 	skip_emulated_instruction(vcpu);
+
 	// rdtsc will  return value in RDX:RAX
 	// we will use already available offset adjusted
 	// tsc for guest
@@ -7623,9 +7624,9 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 				, vcpu->mmio_cur_fragment , vcpu->mmio_nr_fragments );
 	}
 	//end rsr
-*/
-	// To be continue... There are a lot of things which should be done here !!!!!~~~~~~~~~~~
 
+	// To be continue... There are a lot of things which should be done here !!!!!~~~~~~~~~~~
+*/
 		
 
 	atomic_switch_perf_msrs(vmx);
@@ -7764,7 +7765,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	loadsegment(es, __USER_DS);
 #endif
 
-	// kvm rr
+	// TODO: kvm rr
 	// We should record the interrupt after VM exit. Because interrupt injection may not 
 	// be successful at the first time. So we log the interrupt before VM entry, then we 
 	// check if this interrupt was injected success after VM exit.
@@ -7809,9 +7810,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	if(kvm_record) {
 		vcpu->rr_ts.br_count += curr_br_count;
 	}
-
-// end kvm rr
-
+	// TODO: end kvm rr
 
 	vcpu->arch.regs_avail = ~((1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP)
 				  | (1 << VCPU_EXREG_RFLAGS)

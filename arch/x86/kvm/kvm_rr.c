@@ -189,7 +189,6 @@ int kvm_rr_req_handle(struct kvm_vcpu *vcpu, struct kvm_rr_reqs_list *req)
 	gfn_t gfn;
 	int offset;
 	unsigned long hva;
-	unsigned int *rfd_sts;
 
 	if(kvm_record) {
 		struct kvm_rr_req *req_log = (struct kvm_rr_req *)kmalloc(sizeof(struct kvm_rr_req), GFP_KERNEL);
@@ -462,7 +461,7 @@ EXPORT_SYMBOL_GPL(read_log);
 int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len, 
 				void *data )
 {
-	//struct kvm_rr_ts *ts = &vcpu->rr_ts;
+	struct kvm_rr_ts *ts = &vcpu->rr_ts;
 	//size_t count = KVM_RR_LOG_SIZE(data_len);
 	//int ret;
 	//int offset = 0,fil_size;
@@ -477,17 +476,16 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 	
 	switch (log_type) {
 	case KVM_RR_RDTSC:	{
-		/*
 		struct kvm_rr_rdtsc *rdtsc_rr_log;
+		u64 tsc;
 		rdtsc_rr_log = data;
-		u64 tsc = rdtsc_rr_log->tsc;
+		tsc = rdtsc_rr_log->tsc;
 
 		printk("<1>""RDTSC : " \
 			"log type: %d . " \
 			"data length: %d. " \
 			"data(tsc): %lld . " \
-			"\n", log_type , data_len , tsc );
-		*/		
+			"\n", log_type , data_len , tsc );	
 		break;
 	}
 	case KVM_RR_PIO_IN: {
@@ -534,7 +532,6 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 		break;
 	}
 	case KVM_RR_EXT_INT: {
-		/*
 		struct kvm_rr_ext_int * ext_int_rr_log;
 		ext_int_rr_log = data;
 		printk( "Interrupt : " \
@@ -546,7 +543,6 @@ int write_log(u8 log_type, struct kvm_vcpu *vcpu, u16 data_len,
 				"ts.bc: %llu"
 				"\n", ext_int_rr_log->int_vec, \
 				ext_int_rr_log->irq, ext_int_rr_log->irq_count , ts->rip , ts->rcx , ts->br_count); 
-		*/
 		break;
 	}
 	default:
