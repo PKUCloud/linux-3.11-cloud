@@ -5893,6 +5893,7 @@ restart:
 		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 			r = 0;
+			kvm_record = false;
 			goto out;
 		}
 		if (kvm_check_request(KVM_REQ_DEACTIVATE_FPU, vcpu)) {
@@ -6093,6 +6094,8 @@ restart:
 	}
 
 	r = kvm_x86_ops->handle_exit(vcpu);
+	if (vcpu->run->exit_reason == KVM_EXIT_SHUTDOWN)
+		kvm_record = false;
 	return r;
 
 cancel_injection:
