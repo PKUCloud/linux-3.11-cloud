@@ -3362,6 +3362,8 @@ static void mmu_free_roots(struct kvm_vcpu *vcpu)
 	struct kvm_mmu_page *sp;
 	LIST_HEAD(invalid_list);
 
+	if (kvm_record)
+		dump_stack();
 	if (!VALID_PAGE(vcpu->arch.mmu.root_hpa))
 		return;
 
@@ -3851,6 +3853,7 @@ void *__gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 
 	if (vcpu->arch.mmu.root_hpa == INVALID_PAGE) {
 		printk(KERN_ERR "XELATEX - root_hpa == INVALID_PAGE\n");
+		dump_stack();
 		return (void *)INVALID_PAGE;
 	}
 
