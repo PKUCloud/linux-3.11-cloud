@@ -1282,6 +1282,8 @@ int print_record(const char* fmt, ...)
 	va_list args;  
 	int r; 
 
+	return 0;
+
 	va_start(args, fmt);
 	
 	spin_lock(&logger_dev.dev_lock);

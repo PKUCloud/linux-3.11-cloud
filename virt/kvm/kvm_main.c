@@ -1470,15 +1470,15 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 	void *kaddr;
 
 	if (kvm_record) {
+		addr = gfn_to_hva_read(kvm, gfn);
+		if (kvm_is_error_hva(addr)) {
+			printk(KERN_ERR "Tamlok - %s error hva for gfn 0x%llx\n", __func__, gfn);
+			return -EFAULT;
+		}
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 0);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
-					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			//return -EFAULT;
-			//rsr-debug
-			dump_stack();
-			//end rsr-debug
-			goto normal;
+			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE\n", __func__);
+			return -EFAULT;
 		}
 		memcpy(data, kaddr + offset, len);
 		return 0;
@@ -1569,17 +1569,18 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 {
 	struct kvm *kvm = vcpu->kvm;
 	void *kaddr;
+	unsigned long addr;
 
 	if (kvm_record) {
+		addr = gfn_to_hva(kvm, gfn);
+		if (kvm_is_error_hva(addr)) {
+			printk(KERN_ERR "Tamlok - %s error hva for gfn 0x%llx\n", __func__, gfn);
+			return -EFAULT;
+		}
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
-					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			//rsr-debug
-			dump_stack();
-			//end rsr-debug
-			//return -EFAULT;
-			goto normal;
+ 			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE\n", __func__);
+			return -EFAULT;
 		}
 		memcpy(kaddr + offset, data, len);
 		return 0;

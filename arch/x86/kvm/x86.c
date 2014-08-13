@@ -2799,7 +2799,7 @@ static int kvm_vcpu_ioctl_set_lapic(struct kvm_vcpu *vcpu,
 static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
 				    struct rsr_lapic *s)
 {
-	struct kvm_lapic_state *lapic = s->regs;
+	struct kvm_lapic_state *lapic = (struct kvm_lapic_state *)s->regs;
 	vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
 	//print_record("highest_isr = %d\n", s->highest_isr_cache);
 	kvm_apic_post_state_restore(vcpu, lapic);
@@ -6191,8 +6191,10 @@ restart:
 
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		// Only for test
-		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR)
+		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR) {
 			r = ((++vcpu->nr_test) % 2 == 0);
+			r = KVM_RR_COMMIT;
+		}
 		if (r == KVM_RR_COMMIT) {
 			print_record("KVM_RR_COMMIT\n");
 			//printk("after exit -- KVM_RR_COMMIT\n");

@@ -2563,8 +2563,12 @@ static void mmu_set_spte(struct kvm_vcpu *vcpu, u64 *sptep,
 		kvm_mmu_flush_tlb(vcpu);
 	}
 
-	if (unlikely(is_mmio_spte(*sptep) && emulate))
+	if (unlikely(is_mmio_spte(*sptep) && emulate)) {
+		if (gfn == 0xb8 || gfn == 0xbf) {
+			printk(KERN_INFO "mmu_set_spte() is_mmio_spte() gfn 0x%llx\n", gfn);
+		}
 		*emulate = 1;
+	}
 
 	pgprintk("%s: setting spte %llx\n", __func__, *sptep);
 	pgprintk("instantiating %s PTE (%s) at %llx (%llx) addr %p\n",
@@ -2755,6 +2759,15 @@ void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn)
 }
 EXPORT_SYMBOL_GPL(kvm_record_spte_set_pfn);
 
+void kvm_record_check_spte(struct kvm_private_mem_page *private_page, int is_commit)
+{
+	u64 spte = *(private_page->sptep);
+	if (!is_shadow_present_pte(spte))
+		printk(KERN_INFO "error: spte 0x%llx not present. is_commit %d\n", spte, is_commit);
+	if (((spte & PT64_BASE_ADDR_MASK) >> 12) != private_page->private_pfn)
+		printk(KERN_INFO "error: spte 0x%llx != pfn 0x%llx, is_commit %d\n", spte, private_page->private_pfn, is_commit); 
+}
+EXPORT_SYMBOL_GPL(kvm_record_check_spte);
 /* Tamlok
  * Just add write trap page to vcpu->arch.private_pages, not replacing it
  * with private page yet.
@@ -3291,7 +3304,6 @@ exit:
 	trace_fast_page_fault(vcpu, gva, error_code, iterator.sptep,
 			      spte, ret);
 	walk_shadow_page_lockless_end(vcpu);
-
 	return ret;
 }
 
@@ -3753,7 +3765,7 @@ static bool try_async_pf(struct kvm_vcpu *vcpu, bool prefault, gfn_t gfn,
 
 	if (!async)
 		return false; /* *pfn has correct page already */
-
+	printk(KERN_INFO "Warning: try_async_pf() gfn 0x%llx\n", gfn);
 	if (!prefault && can_do_async_pf(vcpu)) {
 		trace_kvm_try_async_get_page(gva, gfn);
 		if (kvm_find_async_pf_gfn(vcpu, gfn)) {
@@ -3780,6 +3792,12 @@ static int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
 	unsigned long mmu_seq;
 	int write = error_code & PFERR_WRITE_MASK;
 	bool map_writable;
+	bool debug = false;
+
+	if (gfn == 0xb8 || gfn == 0xbf) {
+		debug = true;
+		printk(KERN_INFO "tdp_page_fault() gfn 0x%llx error_code 0x%x\n", gfn, error_code);
+	}
 
 	ASSERT(vcpu);
 	ASSERT(VALID_PAGE(vcpu->arch.mmu.root_hpa));
@@ -3790,30 +3808,44 @@ static int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
 		if (likely(r != RET_MMIO_PF_INVALID))
 			return r;
 	}
-
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx\n", __func__, __LINE__, gfn);
+	}
 	r = mmu_topup_memory_caches(vcpu);
 	if (r)
 		return r;
 
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx\n", __func__, __LINE__, gfn);
+	}
 	force_pt_level = mapping_level_dirty_bitmap(vcpu, gfn);
 	if (likely(!force_pt_level)) {
 		level = mapping_level(vcpu, gfn);
 		gfn &= ~(KVM_PAGES_PER_HPAGE(level) - 1);
 	} else
 		level = PT_PAGE_TABLE_LEVEL;
-
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx\n", __func__, __LINE__, gfn);
+	}
 	if (fast_page_fault(vcpu, gpa, level, error_code))
 		return 0;
 
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx\n", __func__, __LINE__, gfn);
+	}
 	mmu_seq = vcpu->kvm->mmu_notifier_seq;
 	smp_rmb();
 
 	if (try_async_pf(vcpu, prefault, gfn, gpa, &pfn, write, &map_writable))
 		return 0;
-
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx, pfn 0x%llx\n", __func__, __LINE__, gfn, pfn);
+	}
 	if (handle_abnormal_pfn(vcpu, 0, gfn, pfn, ACC_ALL, &r))
 		return r;
-
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx\n", __func__, __LINE__, gfn);
+	}
 	spin_lock(&vcpu->kvm->mmu_lock);
 	if (mmu_notifier_retry(vcpu->kvm, mmu_seq))
 		goto out_unlock;
@@ -3821,10 +3853,16 @@ static int tdp_page_fault(struct kvm_vcpu *vcpu, gva_t gpa, u32 error_code,
 	if (likely(!force_pt_level))
 		transparent_hugepage_adjust(vcpu, &gfn, &pfn, &level);
 	// XELATEX
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx\n", __func__, __LINE__, gfn);
+	}
 	r = __direct_map(vcpu, gpa, write, map_writable,
 			 PT_PAGE_TABLE_LEVEL, gfn, pfn, prefault);
 	//r = __direct_map(vcpu, gpa, write, map_writable,
 	//		 level, gfn, pfn, prefault);
+	if (debug) {
+		printk(KERN_INFO "%s, %d, gfn 0x%llx, __direct_map() returns 0x%x\n", __func__, __LINE__, gfn, r);
+	}
 	spin_unlock(&vcpu->kvm->mmu_lock);
 
 	return r;
@@ -3893,16 +3931,17 @@ void *gfn_to_kaddr_ept(struct kvm_vcpu *vcpu, gfn_t gfn, int write)
 
 	kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 	if (kaddr == NULL) {
+		printk(KERN_INFO "__gfn_to_kaddr_ept() get NULL for gfn 0x%llx\n", gfn);
 		if (write)
-			error_code |= PFERR_WRITE_MASK;
+			error_code |= PFERR_WRITE_MASK;  //Here may be wrong
 		r = tdp_page_fault(vcpu, gfn_to_gpa(gfn), error_code, false);
 		if (r < 0) {
-			printk(KERN_ERR "XELATEX - %s, %d, tdp_page_fault2 error\n", __func__, __LINE__);
+			printk(KERN_ERR "XELATEX - %s, %d, tdp_page_fault error, gfn 0x%llx\n", __func__, __LINE__, gfn);
 			return NULL;
 		}
 		kaddr = __gfn_to_kaddr_ept(vcpu, gfn, write);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s, %d, __gfn_to_kaddr_ept error.\n", __func__, __LINE__);
+			printk(KERN_ERR "XELATEX - %s, %d, __gfn_to_kaddr_ept error, gfn 0x%llx\n", __func__, __LINE__, gfn);
 			return NULL;
 		}
 	}

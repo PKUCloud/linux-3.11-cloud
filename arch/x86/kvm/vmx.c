@@ -5786,6 +5786,8 @@ int tm_unsync_init(void *opaque)
 }
 
 extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
+extern void kvm_record_check_spte(struct kvm_private_mem_page *private_page, int is_commit);
+
 /* Tamlok
  * Commit the private pages to the original ones. Called when a quantum is
  * finished and can commit.
@@ -5806,7 +5808,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		//print_record("commit: vcpu %d orgin_pfn 0x%llx private_pfn 0x%llx pages %d\n",
 		//	vcpu->vcpu_id, private_page->original_pfn,
 		//	private_page->private_pfn, i++);
-
+		kvm_record_check_spte(private_page, 1);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 
 		kfree(private);
@@ -5832,6 +5834,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
+		kvm_record_check_spte(private_page, 0);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 
 		kfree(pfn_to_kaddr(private_page->private_pfn));
