@@ -305,6 +305,10 @@ static void kvm_multiple_exception(struct kvm_vcpu *vcpu,
 
 	if (!vcpu->arch.exception.pending) {
 	queue:
+		if (kvm_record)	print_record(0, "%s--%d  vcpu->arch.exception.pending = true\n", __func__, __LINE__);
+		//if (kvm_record) dump_stack();
+
+		
 		vcpu->arch.exception.pending = true;
 		vcpu->arch.exception.has_error_code = has_error;
 		vcpu->arch.exception.nr = nr;
@@ -325,6 +329,7 @@ static void kvm_multiple_exception(struct kvm_vcpu *vcpu,
 	if ((class1 == EXCPT_CONTRIBUTORY && class2 == EXCPT_CONTRIBUTORY)
 		|| (class1 == EXCPT_PF && class2 != EXCPT_BENIGN)) {
 		/* generate double fault per SDM Table 5-5 */
+
 		vcpu->arch.exception.pending = true;
 		vcpu->arch.exception.has_error_code = true;
 		vcpu->arch.exception.nr = DF_VECTOR;
@@ -359,6 +364,7 @@ EXPORT_SYMBOL_GPL(kvm_complete_insn_gp);
 
 void kvm_inject_page_fault(struct kvm_vcpu *vcpu, struct x86_exception *fault)
 {
+	if (kvm_record) print_record(0, "%s--%d\n", __func__, __LINE__);
 	++vcpu->stat.pf_guest;
 	vcpu->arch.cr2 = fault->address;
 	kvm_queue_exception_e(vcpu, PF_VECTOR, fault->error_code);
@@ -369,8 +375,10 @@ void kvm_propagate_fault(struct kvm_vcpu *vcpu, struct x86_exception *fault)
 {
 	if (mmu_is_nested(vcpu) && !fault->nested_page_fault)
 		vcpu->arch.nested_mmu.inject_page_fault(vcpu, fault);
-	else
+	else{
+		if (kvm_record) print_record(0, "%s--%d-->inject_page_fault\n", __func__, __LINE__);
 		vcpu->arch.mmu.inject_page_fault(vcpu, fault);
+	}
 }
 
 void kvm_inject_nmi(struct kvm_vcpu *vcpu)
@@ -1903,6 +1911,9 @@ static int kvm_pv_enable_async_pf(struct kvm_vcpu *vcpu, u64 data)
 
 	vcpu->arch.apf.msr_val = data;
 
+	if (kvm_record)
+		print_record(0, "%s--%d: arch.apf.msr_val=%d \n", __func__, __LINE__, vcpu->arch.apf.msr_val);
+
 	if (!(data & KVM_ASYNC_PF_ENABLED)) {
 		kvm_clear_async_pf_completion_queue(vcpu);
 		kvm_async_pf_hash_reset(vcpu);
@@ -2800,8 +2811,8 @@ static int kvm_vcpu_rollback_set_lapic(struct kvm_vcpu *vcpu,
 				    struct rsr_lapic *s)
 {
 	struct kvm_lapic_state *lapic = s->regs;
-	vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
-	//print_record("highest_isr = %d\n", s->highest_isr_cache);
+	//vcpu->arch.apic->highest_isr_cache = s->highest_isr_cache;
+	//print_record(vcpu->vcpu_id, "highest_isr = %d\n", s->highest_isr_cache);
 	kvm_apic_post_state_restore(vcpu, lapic);
 	update_cr8_intercept(vcpu);
 
@@ -5877,6 +5888,604 @@ extern int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			     int vector, int level, int trig_mode,
 			     unsigned long *dest_map);
 
+//rsr-debug
+void print_cpu_arch_info_for_debugging(struct kvm_vcpu *vcpu, int log_file)
+{
+	struct kvm_vcpu_arch * vcpu_arch = &(vcpu->arch);
+	int i, j;
+
+	for (i = 0; i < NR_VCPU_REGS; i++)
+		print_record(log_file, "regs[%d]=%lu ", i, vcpu_arch->regs[i]);
+	print_record(log_file, "\n");
+
+	print_record(log_file, "regs_avail=%u \n", vcpu_arch->regs_avail);		//find a divergence 
+	print_record(log_file, "regs_dirty=%u \n", vcpu_arch->regs_dirty);		//find a divergence
+
+	print_record(log_file, "cr0=%lu \n", vcpu_arch->cr0);
+	print_record(log_file, "cr0_guest_owned_bits=%lu \n", vcpu_arch->cr0_guest_owned_bits);
+	print_record(log_file, "cr2=%lu \n", vcpu_arch->cr2);
+	print_record(log_file, "cr3=%lu \n", vcpu_arch->cr3);
+	print_record(log_file, "cr4=%lu \n", vcpu_arch->cr4);
+	print_record(log_file, "cr4_guest_owned_bits=%lu \n", vcpu_arch->cr4_guest_owned_bits);
+	print_record(log_file, "cr8=%lu \n", vcpu_arch->cr8);
+
+	print_record(log_file, "hflags=%lu \n", vcpu_arch->hflags);
+	print_record(log_file, "efer=%llu \n", vcpu_arch->efer);
+	print_record(log_file, "apic->base_address=%llu \n", vcpu_arch->apic_base);
+	if ( vcpu_arch->apic ){
+		print_record(log_file, "apic->base_address=%llu \n", vcpu_arch->apic->base_address);
+		print_record(log_file, "apic->lapic_timer.period=%llu \n", vcpu_arch->apic->lapic_timer.period);
+		print_record(log_file, "apic->lapic_timer.tscdeadline=%llu \n", vcpu_arch->apic->lapic_timer.tscdeadline);
+		print_record(log_file, "apic->lapic_timer.timer_mode_mask=%lu \n", vcpu_arch->apic->lapic_timer.timer_mode_mask);
+		print_record(log_file, "apic->divide_count=%lu \n", vcpu_arch->apic->divide_count);
+		print_record(log_file, "apic->irr_pending=%d \n", vcpu_arch->apic->irr_pending);
+		print_record(log_file, "apic->isr_count=%d \n", vcpu_arch->apic->isr_count);
+		print_record(log_file, "apic->highest_isr_cache=%d \n", vcpu_arch->apic->highest_isr_cache);
+		for (i = 0; i < 8; i++)
+			if (0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i))
+				print_record(log_file, "regs[%d]= 0x%x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
+		print_record(log_file, "\n");
+		print_record(log_file, "apic->vapic_addr=%llx \n", vcpu_arch->apic->vapic_addr);
+		print_record(log_file, "apic->vapic_page(pointer)=%llx \n", vcpu_arch->apic->vapic_page);
+		print_record(log_file, "apic->pending_events=%llu \n", vcpu_arch->apic->pending_events);
+		print_record(log_file, "apic->sipi_vector=%lu \n", vcpu_arch->apic->sipi_vector);
+	}
+	print_record(log_file, "apic_attention=%lu \n", vcpu_arch->apic_attention);
+	print_record(log_file, "apic_arb_prio=%d \n", vcpu_arch->apic_arb_prio);
+
+	print_record(log_file, "mp_state=%d \n", vcpu_arch->mp_state);
+	print_record(log_file, "ia32_misc_enable_msr=%llu \n", vcpu_arch->ia32_misc_enable_msr);
+	print_record(log_file, "tpr_access_reporting=%d \n", vcpu_arch->tpr_access_reporting);
+
+	print_record(log_file, "mmu.root_hpa=%llu \n", vcpu_arch->mmu.root_hpa);
+	print_record(log_file, "mmu.root_level=%d \n", vcpu_arch->mmu.root_level);
+	print_record(log_file, "mmu.shadow_root_level=%d \n", vcpu_arch->mmu.shadow_root_level);
+	print_record(log_file, "mmu.direct_map=%d \n", vcpu_arch->mmu.direct_map);
+	for (i = 0; i < 16; i++)
+		print_record(log_file, "mmu.permissions[%d]=%d ", i, vcpu_arch->mmu.permissions[i]);
+	print_record(log_file, "\n");
+	if (vcpu_arch->mmu.pae_root)
+		print_record(log_file, "mmu.pae_root=%llu \n", *(vcpu_arch->mmu.pae_root));
+	if (vcpu_arch->mmu.lm_root)
+		print_record(log_file, "mmu.lm_root=%llu \n", *(vcpu_arch->mmu.lm_root));
+	for (i = 0; i < 2; i++)
+		for (j = 0; j < 4; j++)
+			print_record(log_file, "mmu.rsvd_bits_mask[%d][%d]=%llu ", i, j, vcpu_arch->mmu.rsvd_bits_mask[i][j]);
+	print_record(log_file, "\n");
+	print_record(log_file, "mmu.last_pte_bitmap=%u \n", vcpu_arch->mmu.last_pte_bitmap);
+	print_record(log_file, "mmu.nx=%u \n", vcpu_arch->mmu.nx);
+	for (i = 0; i < 4; i++)
+		print_record(log_file, "mmu.pdptrs[%d]=%llu ", i, vcpu_arch->mmu.pdptrs[i]);
+	print_record(log_file, "\n");
+
+	if (vcpu_arch->walk_mmu){
+		print_record(log_file, "walk_mmu->.root_hpa=%llu \n", vcpu_arch->walk_mmu->root_hpa);
+		print_record(log_file, "walk_mmu->.root_level=%d \n", vcpu_arch->walk_mmu->root_level);
+		print_record(log_file, "walk_mmu->.shadow_root_level=%d \n", vcpu_arch->walk_mmu->shadow_root_level);
+		print_record(log_file, "walk_mmu->.direct_map=%d \n", vcpu_arch->walk_mmu->direct_map);
+		for (i = 0; i < 16; i++)
+			print_record(log_file, "walk_mmu->.permissions[%d]=%d ", i, vcpu_arch->walk_mmu->permissions[i]);
+		print_record(log_file, "\n");
+		if (vcpu_arch->walk_mmu->pae_root)
+			print_record(log_file, "walk_mmu->.pae_root=%llu \n", *(vcpu_arch->walk_mmu->pae_root));
+		if (vcpu_arch->walk_mmu->lm_root)
+			print_record(log_file, "walk_mmu->.lm_root=%llu \n", *(vcpu_arch->walk_mmu->lm_root));
+		for (i = 0; i < 2; i++)
+			for (j = 0; j < 4; j++)
+				print_record(log_file, "walk_mmu->.rsvd_bits_mask[%d][%d]=%llu ", i, j, vcpu_arch->walk_mmu->rsvd_bits_mask[i][j]);
+		print_record(log_file, "\n");
+		print_record(log_file, "walk_mmu->.last_pte_bitmap=%u \n", vcpu_arch->walk_mmu->last_pte_bitmap);
+		print_record(log_file, "walk_mmu->.nx=%u \n", vcpu_arch->walk_mmu->nx);
+		for (i = 0; i < 4; i++)
+			print_record(log_file, "walk_mmu->.pdptrs[%d]=%llu ", i, vcpu_arch->walk_mmu->pdptrs[i]);
+		print_record(log_file, "\n");
+	}
+
+	print_record(log_file, "mmu_pte_list_desc_cache.nobjs=%d \n", vcpu_arch->mmu_pte_list_desc_cache.nobjs);
+	for (i = 0; i < 40; i++)
+		print_record(log_file, "mmu_pte_list_desc_cache.objects[%d](pointer)=%d ", i, vcpu_arch->mmu_pte_list_desc_cache.objects[i]);
+	print_record(log_file, "\n");
+
+	print_record(log_file, "mmu_page_cache.nobjs=%d \n", vcpu_arch->mmu_page_cache.nobjs);
+	for (i = 0; i < 40; i++)
+		print_record(log_file, "mmu_page_cache.objects[%d](pointer)=%d ", i, vcpu_arch->mmu_page_cache.objects[i]);
+	print_record(log_file, "\n");
+
+	print_record(log_file, "mmu_page_header_cache.nobjs=%d \n", vcpu_arch->mmu_page_header_cache.nobjs);
+	for (i = 0; i < 40; i++)
+		print_record(log_file, "mmu_page_header_cache.objects[%d](pointer)=%d ", i, vcpu_arch->mmu_page_header_cache.objects[i]);
+	print_record(log_file, "\n");
+
+	//guest_fpu
+	print_record(log_file, "guest_fpu.last_cpu=%u \n", vcpu_arch->guest_fpu.last_cpu);
+	print_record(log_file, "guest_fpu.has_fpu=%u \n", vcpu_arch->guest_fpu.has_fpu);
+
+	print_record(log_file, "guest_fpu->state.fxsave.cwd=0x%x\n",vcpu_arch->guest_fpu.state->fxsave.cwd);
+	print_record(log_file, "swd=0x%x\n",vcpu_arch->guest_fpu.state->fxsave.swd);
+	print_record(log_file, "twd=0x%x\n",vcpu_arch->guest_fpu.state->fxsave.twd);
+	print_record(log_file, "fop=0x%x\n",vcpu_arch->guest_fpu.state->fxsave.fop);
+	
+	print_record(log_file, "rip=0x%llx\n",vcpu_arch->guest_fpu.state->fxsave.rip);
+	print_record(log_file, "rdp=0x%llx\n",vcpu_arch->guest_fpu.state->fxsave.rdp);
+	
+	print_record(log_file, "mxcsr=0x%lx\n",vcpu_arch->guest_fpu.state->fxsave.mxcsr);
+	print_record(log_file, "mxcsr_mask=0x%lx\n",vcpu_arch->guest_fpu.state->fxsave.mxcsr_mask);
+	for (i = 0; i < 32; i++)
+		if (0 != vcpu_arch->guest_fpu.state->fxsave.st_space[i])
+			print_record(log_file, "st_space[%d]=0x%lx  ", i, vcpu_arch->guest_fpu.state->fxsave.st_space[i]);
+	print_record(log_file, "\n");
+	for (i = 0; i < 64; i++)
+		if (0 != vcpu_arch->guest_fpu.state->fxsave.xmm_space[i])
+			print_record(log_file, "xmm_space[%d]=0x%lx  ", i, vcpu_arch->guest_fpu.state->fxsave.xmm_space[i]);
+	print_record(log_file, "\n");
+
+	print_record(log_file, "guest_fpu->state.fsave.cwd=0x%x\n",vcpu_arch->guest_fpu.state->fsave.cwd);
+	print_record(log_file, "swd=0x%x\n",vcpu_arch->guest_fpu.state->fsave.swd);
+	print_record(log_file, "twd=0x%x\n",vcpu_arch->guest_fpu.state->fsave.twd);
+	print_record(log_file, "fip=0x%x\n",vcpu_arch->guest_fpu.state->fsave.fip);
+	print_record(log_file, "fcs=0x%x\n",vcpu_arch->guest_fpu.state->fsave.fcs);
+	print_record(log_file, "foo=0x%x\n",vcpu_arch->guest_fpu.state->fsave.foo);
+	print_record(log_file, "fos=0x%x\n",vcpu_arch->guest_fpu.state->fsave.fos);
+	for (i = 0; i < 20; i++)
+		if (0 != vcpu_arch->guest_fpu.state->fsave.st_space[i])
+			print_record(log_file, "st_space[%d]=0x%lx  ", i, vcpu_arch->guest_fpu.state->fsave.st_space[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "status=0x%x\n",vcpu_arch->guest_fpu.state->fsave.status);
+
+	print_record(log_file, "guest_fpu->state.fsave.cwd=0x%x\n",vcpu_arch->guest_fpu.state->soft.cwd);
+	print_record(log_file, "swd=0x%x\n",vcpu_arch->guest_fpu.state->soft.swd);
+	print_record(log_file, "twd=0x%x\n",vcpu_arch->guest_fpu.state->soft.twd);
+	print_record(log_file, "fip=0x%x\n",vcpu_arch->guest_fpu.state->soft.fip);
+	print_record(log_file, "fcs=0x%x\n",vcpu_arch->guest_fpu.state->soft.fcs);
+	print_record(log_file, "foo=0x%x\n",vcpu_arch->guest_fpu.state->soft.foo);
+	print_record(log_file, "fos=0x%x\n",vcpu_arch->guest_fpu.state->soft.fos);
+	for (i = 0; i < 20; i++)
+		if (0 != vcpu_arch->guest_fpu.state->soft.st_space[i])
+			print_record(log_file, "st_space[%d]=0x%lx  ", i, vcpu_arch->guest_fpu.state->soft.st_space[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "ftop=0x%x\n",vcpu_arch->guest_fpu.state->soft.ftop);
+	print_record(log_file, "changed=0x%x\n",vcpu_arch->guest_fpu.state->soft.changed);
+	print_record(log_file, "lookahead=0x%x\n",vcpu_arch->guest_fpu.state->soft.lookahead);
+	print_record(log_file, "no_update=0x%x\n",vcpu_arch->guest_fpu.state->soft.no_update);
+	print_record(log_file, "rm=0x%x\n",vcpu_arch->guest_fpu.state->soft.rm);
+	print_record(log_file, "alimit=0x%x\n",vcpu_arch->guest_fpu.state->soft.alimit);
+	print_record(log_file, "entry_eip=0x%x\n",vcpu_arch->guest_fpu.state->soft.entry_eip);
+
+	//guest_fpu   xsave   i387
+	print_record(log_file, "guest_fpu.state->xsave.i387.cwd=0x%x\n",vcpu_arch->guest_fpu.state->xsave.i387.cwd);
+	print_record(log_file, "swd=0x%x\n",vcpu_arch->guest_fpu.state->xsave.i387.swd);
+	print_record(log_file, "twd=0x%x\n",vcpu_arch->guest_fpu.state->xsave.i387.twd);
+	print_record(log_file, "fop=0x%x\n",vcpu_arch->guest_fpu.state->xsave.i387.fop);
+	
+	print_record(log_file, "rip=0x%llx\n",vcpu_arch->guest_fpu.state->xsave.i387.rip);
+	print_record(log_file, "rdp=0x%llx\n",vcpu_arch->guest_fpu.state->xsave.i387.rdp);
+	
+	print_record(log_file, "mxcsr=0x%lx\n",vcpu_arch->guest_fpu.state->xsave.i387.mxcsr);
+	print_record(log_file, "mxcsr_mask=0x%lx\n",vcpu_arch->guest_fpu.state->xsave.i387.mxcsr_mask);
+	for (i = 0; i < 32; i++)
+		if (0 != vcpu_arch->guest_fpu.state->xsave.i387.st_space[i])
+			print_record(log_file, "st_space[%d]=0x%lx  ", i, vcpu_arch->guest_fpu.state->xsave.i387.st_space[i]);
+	print_record(log_file, "\n");
+	for (i = 0; i < 64; i++)
+		if (0 != vcpu_arch->guest_fpu.state->xsave.i387.xmm_space[i])
+			print_record(log_file, "xmm_space[%d]=0x%lx  ", i, vcpu_arch->guest_fpu.state->xsave.i387.xmm_space[i]);
+	print_record(log_file, "\n");	
+
+	//guest_fpu   xsave   xsave_hdr
+	print_record(log_file, "guest_fpu.state->xsave.xsave_hdr.xstate_bv=0x%llx\n",vcpu_arch->guest_fpu.state->xsave.xsave_hdr.xstate_bv);
+	print_record(log_file, "reserved1[0]=0x%llx\n",vcpu_arch->guest_fpu.state->xsave.xsave_hdr.reserved1[0]);
+	print_record(log_file, "reserved1[1]=0x%llx\n",vcpu_arch->guest_fpu.state->xsave.xsave_hdr.reserved1[1]);
+	for (i = 0; i < 5; i++)
+		print_record(log_file, "reserved2[%d]=0x%lx  ", i, vcpu_arch->guest_fpu.state->xsave.xsave_hdr.reserved2[i]);
+	print_record(log_file, "\n");
+	for (i = 0; i < 64; i++)
+		if (0 != vcpu_arch->guest_fpu.state->xsave.ymmh.ymmh_space[i])
+			print_record(log_file, "guest_fpu.state->xsave.ymmh.ymmh_space[%d]=0x%lx  ", i,
+						vcpu_arch->guest_fpu.state->xsave.ymmh.ymmh_space[i]);
+	print_record(log_file, "\n");
+	//xcr0
+	print_record(log_file, "arch.xcr0=0x%llx\n",vcpu_arch->xcr0);
+
+	//pio
+	print_record(log_file, "arch.pio.count=0x%lu\n",vcpu_arch->pio.count);
+	print_record(log_file, "arch.pio.in=%d\n",vcpu_arch->pio.in);
+	print_record(log_file, "arch.pio.port=%d\n",vcpu_arch->pio.port);
+	print_record(log_file, "arch.pio.size=%d\n",vcpu_arch->pio.size);
+	
+	if (vcpu_arch->pio_data)
+		print_record(log_file, "arch.pio_data(pointer!)=0x%llx\n",vcpu_arch->pio_data);
+
+	print_record(log_file, "arch.event_exit_inst_len=%u\n",vcpu_arch->event_exit_inst_len);
+
+	//exception
+	print_record(log_file, "arch.exception.pending=%d\n",vcpu_arch->exception.pending);
+	print_record(log_file, "arch.exception.has_error_code=%d\n",vcpu_arch->exception.has_error_code);
+	print_record(log_file, "arch.exception.reinject=%d\n",vcpu_arch->exception.reinject);
+	print_record(log_file, "arch.exception.nr=%u\n",vcpu_arch->exception.nr);
+	print_record(log_file, "arch.exception.error_code=%u\n",vcpu_arch->exception.error_code);
+
+	//interrupt
+	print_record(log_file, "arch.interrupt.pending=%u\n",vcpu_arch->interrupt.pending);
+	print_record(log_file, "arch.interrupt.soft=%u\n",vcpu_arch->interrupt.soft);
+	print_record(log_file, "arch.interrupt.nr=%u\n",vcpu_arch->interrupt.nr);
+
+	print_record(log_file, "arch.halt_request=%u\n",vcpu_arch->halt_request);
+
+	print_record(log_file, "arch.cpuid_nent=%u\n",vcpu_arch->cpuid_nent);
+
+	//cpuid_entries
+	for (i = 0; i < 80; i++){
+		print_record(log_file, "vcpu_arch->cpuid_entries.eax[%d]=%u  \n", i, vcpu_arch->cpuid_entries[i].eax);
+		print_record(log_file, "cpuid_entries.ebx[%d]=%u  \n", i, vcpu_arch->cpuid_entries[i].ebx);
+		print_record(log_file, "cpuid_entries[%d].ecx=%u  \n", i, vcpu_arch->cpuid_entries[i].ecx);
+		print_record(log_file, "cpuid_entries[%d].edx=%u  \n", i, vcpu_arch->cpuid_entries[i].edx);
+		print_record(log_file, "cpuid_entries[%d].flags=%u  \n", i, vcpu_arch->cpuid_entries[i].flags);
+		print_record(log_file, "cpuid_entries[%d].function=%u  \n", i, vcpu_arch->cpuid_entries[i].function);
+		print_record(log_file, "cpuid_entries[%d].index=%u  \n", i, vcpu_arch->cpuid_entries[i].index);
+		print_record(log_file, "cpuid_entries[%d].padding[0]=%u  \n", i, vcpu_arch->cpuid_entries[i].padding[0]);
+		print_record(log_file, "cpuid_entries[%d].padding[1]=%u  \n", i, vcpu_arch->cpuid_entries[i].padding[1]);
+		print_record(log_file, "cpuid_entries[%d].padding[2]=%u  \n", i, vcpu_arch->cpuid_entries[i].padding[2]);
+	}
+
+	//emulate_ctxt.
+	print_record(log_file, "arch.emulate_ctxt.eflags=%lu\n",vcpu_arch->emulate_ctxt.eflags);
+	print_record(log_file, "arch.emulate_ctxt.eip=%lu\n",vcpu_arch->emulate_ctxt.eip);
+	switch (vcpu_arch->emulate_ctxt.mode){
+	case X86EMUL_MODE_PROT64:
+		print_record(log_file, "vcpu_arch->emulate_ctxt.mode=X86EMUL_MODE_PROT64\n");
+		break;
+	case X86EMUL_MODE_PROT32:
+		print_record(log_file, "vcpu_arch->emulate_ctxt.mode=X86EMUL_MODE_PROT32\n");
+		break;
+	case X86EMUL_MODE_PROT16:
+		print_record(log_file, "vcpu_arch->emulate_ctxt.mode=X86EMUL_MODE_PROT16\n");
+		break;
+	case X86EMUL_MODE_VM86:
+		print_record(log_file, "vcpu_arch->emulate_ctxt.mode=X86EMUL_MODE_VM86\n");
+		break;
+	case X86EMUL_MODE_REAL:
+		print_record(log_file, "vcpu_arch->emulate_ctxt.mode=X86EMUL_MODE_REAL\n");
+		break;
+	default:
+		print_record(log_file, "vcpu_arch->emulate_ctxt.mode is ERROR!\n");
+		break;
+	}
+	print_record(log_file, "arch.emulate_ctxt.interruptibility=%d\n",vcpu_arch->emulate_ctxt.interruptibility);
+	print_record(log_file, "arch.emulate_ctxt.guest_mode=%d\n",vcpu_arch->emulate_ctxt.guest_mode);
+	print_record(log_file, "arch.emulate_ctxt.perm_ok=%d\n",vcpu_arch->emulate_ctxt.perm_ok);
+	print_record(log_file, "arch.emulate_ctxt.only_vendor_specific_insn=%d\n",vcpu_arch->emulate_ctxt.only_vendor_specific_insn);
+	print_record(log_file, "arch.emulate_ctxt.have_exception=%d\n",vcpu_arch->emulate_ctxt.have_exception);
+
+	print_record(log_file, "arch.emulate_ctxt.exception.vector=%u\n",vcpu_arch->emulate_ctxt.exception.vector);
+	print_record(log_file, "arch.emulate_ctxt.exception.error_code_valid=%u\n",vcpu_arch->emulate_ctxt.exception.error_code_valid);
+	print_record(log_file, "arch.emulate_ctxt.exception.error_code=%u\n",vcpu_arch->emulate_ctxt.exception.error_code);
+	print_record(log_file, "arch.emulate_ctxt.exception.nested_page_fault=%u\n",vcpu_arch->emulate_ctxt.exception.nested_page_fault);
+	print_record(log_file, "arch.emulate_ctxt.exception.address=0x%llx\n",vcpu_arch->emulate_ctxt.exception.address);
+	/* decode cache */
+	print_record(log_file, "arch.emulate_ctxt.twobyte=%u\n",vcpu_arch->emulate_ctxt.twobyte);
+	print_record(log_file, "arch.emulate_ctxt.b=%u\n",vcpu_arch->emulate_ctxt.b);
+	print_record(log_file, "arch.emulate_ctxt.intercept=%u\n",vcpu_arch->emulate_ctxt.intercept);
+	print_record(log_file, "arch.emulate_ctxt.lock_prefix=%u\n",vcpu_arch->emulate_ctxt.lock_prefix);
+	print_record(log_file, "arch.emulate_ctxt.rep_prefix=%u\n",vcpu_arch->emulate_ctxt.rep_prefix);
+	print_record(log_file, "arch.emulate_ctxt.op_bytes=%u\n",vcpu_arch->emulate_ctxt.op_bytes);
+	print_record(log_file, "arch.emulate_ctxt.ad_bytes=%u\n",vcpu_arch->emulate_ctxt.ad_bytes);
+	print_record(log_file, "arch.emulate_ctxt.rex_prefix=%u\n",vcpu_arch->emulate_ctxt.rex_prefix);
+	//src
+	print_record(log_file, "arch.emulate_ctxt.src.type=%d \n",vcpu_arch->emulate_ctxt.src.type);
+	print_record(log_file, "arch.emulate_ctxt.src.bytes=%u \n",vcpu_arch->emulate_ctxt.src.bytes);
+	print_record(log_file, "arch.emulate_ctxt.src.count=%u \n",vcpu_arch->emulate_ctxt.src.count);
+	print_record(log_file, "arch.emulate_ctxt.src.orig_val=%llu \n",vcpu_arch->emulate_ctxt.src.orig_val);
+	print_record(log_file, "arch.emulate_ctxt.src.addr.mem.ea=%lu \n",vcpu_arch->emulate_ctxt.src.addr.mem.ea);
+	print_record(log_file, "arch.emulate_ctxt.src.addr.mem.seg=%u \n",vcpu_arch->emulate_ctxt.src.addr.mem.seg);
+	print_record(log_file, "arch.emulate_ctxt.src.val64=%llu \n",vcpu_arch->emulate_ctxt.src.val64);
+	//src2
+	print_record(log_file, "arch.emulate_ctxt.src2.type=%d \n",vcpu_arch->emulate_ctxt.src2.type);
+	print_record(log_file, "arch.emulate_ctxt.src2.bytes=%u \n",vcpu_arch->emulate_ctxt.src2.bytes);
+	print_record(log_file, "arch.emulate_ctxt.src2.count=%u \n",vcpu_arch->emulate_ctxt.src2.count);
+	print_record(log_file, "arch.emulate_ctxt.src2.orig_val=%llu \n",vcpu_arch->emulate_ctxt.src2.orig_val);
+	print_record(log_file, "arch.emulate_ctxt.src2.addr.mem.ea=%lu \n",vcpu_arch->emulate_ctxt.src2.addr.mem.ea);
+	print_record(log_file, "arch.emulate_ctxt.src2.addr.mem.seg=%u \n",vcpu_arch->emulate_ctxt.src2.addr.mem.seg);
+	print_record(log_file, "arch.emulate_ctxt.src2.val64=%llu \n",vcpu_arch->emulate_ctxt.src2.val64);
+	//dst
+	print_record(log_file, "arch.emulate_ctxt.dst.type=%d \n",vcpu_arch->emulate_ctxt.dst.type);
+	print_record(log_file, "arch.emulate_ctxt.dst.bytes=%u \n",vcpu_arch->emulate_ctxt.dst.bytes);
+	print_record(log_file, "arch.emulate_ctxt.dst.count=%u \n",vcpu_arch->emulate_ctxt.dst.count);
+	print_record(log_file, "arch.emulate_ctxt.dst.orig_val=%llu \n",vcpu_arch->emulate_ctxt.dst.orig_val);
+	print_record(log_file, "arch.emulate_ctxt.dst.addr.mem.ea=%lu \n",vcpu_arch->emulate_ctxt.dst.addr.mem.ea);
+	print_record(log_file, "arch.emulate_ctxt.dst.addr.mem.seg=%u \n",vcpu_arch->emulate_ctxt.dst.addr.mem.seg);
+	print_record(log_file, "arch.emulate_ctxt.dst.val64=%llu \n",vcpu_arch->emulate_ctxt.dst.val64);
+	print_record(log_file, "arch.emulate_ctxt.has_seg_override=%d \n",vcpu_arch->emulate_ctxt.has_seg_override);
+	print_record(log_file, "arch.emulate_ctxt.seg_override=%u \n",vcpu_arch->emulate_ctxt.seg_override);
+	print_record(log_file, "arch.emulate_ctxt.d=0x%llx \n",vcpu_arch->emulate_ctxt.d);
+
+	print_record(log_file, "arch.emulate_ctxt.modrm=%u \n",vcpu_arch->emulate_ctxt.modrm);
+	print_record(log_file, "arch.emulate_ctxt.modrm_mod=%u \n",vcpu_arch->emulate_ctxt.modrm_mod);
+	print_record(log_file, "arch.emulate_ctxt.modrm_reg=%u \n",vcpu_arch->emulate_ctxt.modrm_reg);
+	print_record(log_file, "arch.emulate_ctxt.modrm_rm=%u \n",vcpu_arch->emulate_ctxt.modrm_rm);
+	print_record(log_file, "arch.emulate_ctxt.modrm_seg=%u \n",vcpu_arch->emulate_ctxt.modrm_seg);
+	print_record(log_file, "arch.emulate_ctxt.rip_relative=%u \n",vcpu_arch->emulate_ctxt.rip_relative);
+	print_record(log_file, "arch.emulate_ctxt._eip=%lu \n",vcpu_arch->emulate_ctxt._eip);
+
+	//memop
+	print_record(log_file, "arch.emulate_ctxt.memop.type=%d \n",vcpu_arch->emulate_ctxt.memop.type);
+	print_record(log_file, "arch.emulate_ctxt.memop.bytes=%u \n",vcpu_arch->emulate_ctxt.memop.bytes);
+	print_record(log_file, "arch.emulate_ctxt.memop.count=%u \n",vcpu_arch->emulate_ctxt.memop.count);
+	print_record(log_file, "arch.emulate_ctxt.memop.orig_val=%llu \n",vcpu_arch->emulate_ctxt.memop.orig_val);
+	print_record(log_file, "arch.emulate_ctxt.memop.addr.mem.ea=%lu \n",vcpu_arch->emulate_ctxt.memop.addr.mem.ea);
+	print_record(log_file, "arch.emulate_ctxt.memop.addr.mem.seg=%u \n",vcpu_arch->emulate_ctxt.memop.addr.mem.seg);
+	print_record(log_file, "arch.emulate_ctxt.memop.val64=%llu \n",vcpu_arch->emulate_ctxt.memop.val64);
+
+	print_record(log_file, "arch.emulate_ctxt.regs_valid=%lu \n",vcpu_arch->emulate_ctxt.regs_valid);
+	print_record(log_file, "arch.emulate_ctxt.regs_dirty=%lu \n",vcpu_arch->emulate_ctxt.regs_dirty);
+
+	for (i = 0; i < NR_VCPU_REGS; i++)
+		print_record(log_file, "arch.emulate_ctxt._regs[%d]=%lu  ", i, vcpu_arch->emulate_ctxt._regs[i]);
+	print_record(log_file, "\n");
+	
+	//*memop
+	if (vcpu_arch->emulate_ctxt.memopp){
+		switch (vcpu_arch->emulate_ctxt.memopp->type){
+		case 0:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type=OP_REG\n");
+			break;
+		case 1:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type=OP_MEM\n");
+			break;
+		case 2:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type=OP_MEM_STR\n");
+			break;
+		case 3:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type=OP_IMM\n");
+			break;
+		case 4:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type=OP_XMM\n");
+			break;
+		case 5:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type=OP_MM\n");
+			break;
+		case 6:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type=OP_NONE\n");
+			break;		
+		default:
+			print_record(log_file, "arch->emulate_ctxt.memopp->type is ERROR!\n");
+			break;
+		}
+		print_record(log_file, "arch.emulate_ctxt.memopp.bytes=%u \n",vcpu_arch->emulate_ctxt.memopp->bytes);
+		print_record(log_file, "arch.emulate_ctxt.memopp.count=%u \n",vcpu_arch->emulate_ctxt.memopp->count);
+		print_record(log_file, "arch.emulate_ctxt.memopp.orig_val=%llu \n",vcpu_arch->emulate_ctxt.memopp->orig_val);
+		print_record(log_file, "arch.emulate_ctxt.memopp.addr.mem.ea=%lu \n",vcpu_arch->emulate_ctxt.memopp->addr.mem.ea);
+		print_record(log_file, "arch.emulate_ctxt.memopp.addr.mem.seg=%u \n",vcpu_arch->emulate_ctxt.memopp->addr.mem.seg);
+		print_record(log_file, "arch.emulate_ctxt.memopp.val64=%llu \n",vcpu_arch->emulate_ctxt.memopp->val64);
+	}
+
+	//fetch
+	for (i = 0; i < 15; i++)
+		if (0 != vcpu_arch->emulate_ctxt.fetch.data[i])
+			print_record(log_file, "arch.emulate_ctxt.fetch.data[%d]=%u  ", i, vcpu_arch->emulate_ctxt.fetch.data[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "arch.emulate_ctxt.fetch.start=%lu \n",vcpu_arch->emulate_ctxt.fetch.start);
+	print_record(log_file, "arch.emulate_ctxt.fetch.end=%lu \n",vcpu_arch->emulate_ctxt.fetch.end);
+
+	//io_read
+	for (i = 0; i < 1024; i++)
+		if (0 != vcpu_arch->emulate_ctxt.io_read.data[i])
+			print_record(log_file, "arch.emulate_ctxt.io_read.data[%d]=%u  ", i, vcpu_arch->emulate_ctxt.io_read.data[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "arch.emulate_ctxt.io_read.pos=%lu \n",vcpu_arch->emulate_ctxt.io_read.pos);
+	print_record(log_file, "arch.emulate_ctxt.io_read.end=%lu \n",vcpu_arch->emulate_ctxt.io_read.end);	
+
+	//io_read
+	for (i = 0; i < 1024; i++)
+		if (0 != vcpu_arch->emulate_ctxt.mem_read.data[i])
+			print_record(log_file, "arch.emulate_ctxt.mem_read.data[%d]=%u  ", i, vcpu_arch->emulate_ctxt.mem_read.data[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "arch.emulate_ctxt.mem_read.pos=%lu \n",vcpu_arch->emulate_ctxt.mem_read.pos);
+	print_record(log_file, "arch.emulate_ctxt.mem_read.end=%lu \n",vcpu_arch->emulate_ctxt.mem_read.end);
+
+	//arch.emulate_regs_need_sync_to_vcpu
+	print_record(log_file, "arch.emulate_regs_need_sync_to_vcpu=%d \n",vcpu_arch->emulate_regs_need_sync_to_vcpu);
+	print_record(log_file, "arch.emulate_regs_need_sync_from_vcpu=%d \n",vcpu_arch->emulate_regs_need_sync_from_vcpu);
+
+	print_record(log_file, "arch.time=%llu \n",vcpu_arch->time);
+
+	//hv_clock
+	print_record(log_file, "arch.hv_clock.version=%lu \n",vcpu_arch->hv_clock.version);
+	print_record(log_file, "arch.hv_clock.pad0=%lu \n",vcpu_arch->hv_clock.pad0);
+	print_record(log_file, "arch.hv_clock.tsc_timestamp=%llu \n",vcpu_arch->hv_clock.tsc_timestamp);
+	print_record(log_file, "arch.hv_clock.system_time=%llu \n",vcpu_arch->hv_clock.system_time);
+	print_record(log_file, "arch.hv_clock.tsc_to_system_mul=%lu \n",vcpu_arch->hv_clock.tsc_to_system_mul);
+	print_record(log_file, "arch.hv_clock.tsc_shift=%d \n",vcpu_arch->hv_clock.tsc_shift);
+	print_record(log_file, "arch.hv_clock.flags=%u \n",vcpu_arch->hv_clock.flags);
+	print_record(log_file, "arch.hv_clock.pad[0]=%u \n",vcpu_arch->hv_clock.pad[0]);
+	print_record(log_file, "arch.hv_clock.pad[1]=%u \n",vcpu_arch->hv_clock.pad[1]);
+	print_record(log_file, "arch.hw_tsc_khz=%lu \n",vcpu_arch->hw_tsc_khz);
+
+	//pv_time
+	print_record(log_file, "arch.pv_time.generation=%llu \n",vcpu_arch->pv_time.generation);
+	print_record(log_file, "arch.pv_time.gpa=0x%llx \n",vcpu_arch->pv_time.gpa);
+	print_record(log_file, "arch.pv_time.hva=%lu \n",vcpu_arch->pv_time.hva);
+	print_record(log_file, "arch.pv_time.len=%lu \n",vcpu_arch->pv_time.len);
+	print_record(log_file, "arch.pv_time.*memslot(!pointer!)=0x%llx \n",vcpu_arch->pv_time.memslot);		//need to dig more
+	
+	print_record(log_file, "arch.pv_time_enabled=%d \n",vcpu_arch->pv_time_enabled);
+	print_record(log_file, "arch.pvclock_set_guest_stopped_request=%d \n",vcpu_arch->pvclock_set_guest_stopped_request);
+	
+	//st
+	print_record(log_file, "arch.st.msr_val=%llu \n",vcpu_arch->st.msr_val);
+	print_record(log_file, "arch.st.last_steal=%llu \n",vcpu_arch->st.last_steal);
+	print_record(log_file, "arch.st.accum_steal=%llu \n",vcpu_arch->st.accum_steal);
+
+	print_record(log_file, "arch.st.stime.generation=%llu \n",vcpu_arch->st.stime.generation);
+	print_record(log_file, "arch.st.stime.gpa=0x%llx \n",vcpu_arch->st.stime.gpa);
+	print_record(log_file, "arch.st.stime.hva=%lu \n",vcpu_arch->st.stime.hva);
+	print_record(log_file, "arch.st.stime.len=%lu \n",vcpu_arch->st.stime.len);
+	print_record(log_file, "arch.st.stime.*memslot(!pointer!)=0x%llx \n",vcpu_arch->st.stime.memslot);	//need to dig more
+
+	print_record(log_file, "arch.st.steal.steal=%llu \n",vcpu_arch->st.steal.steal);
+	print_record(log_file, "arch.st.steal.version=%lu \n",vcpu_arch->st.steal.version);
+	print_record(log_file, "arch.st.steal.flags=%lu \n",vcpu_arch->st.steal.flags);
+	for (i = 0; i < 12; i++)
+		if (0 != vcpu_arch->st.steal.pad[i])
+			print_record(log_file, "arch.st.steal.pad[%d]=%lu  ",i ,vcpu_arch->st.steal.pad[i]);
+	print_record(log_file, "\n");
+	
+	print_record(log_file, "arch.last_guest_tsc=%llu \n",vcpu_arch->last_guest_tsc);
+	print_record(log_file, "arch.last_kernel_ns=%llu \n",vcpu_arch->last_kernel_ns);
+	print_record(log_file, "arch.last_host_tsc=%llu \n",vcpu_arch->last_host_tsc);
+	print_record(log_file, "arch.tsc_offset_adjustment=%llu \n",vcpu_arch->tsc_offset_adjustment);
+	print_record(log_file, "arch.this_tsc_nsec=%llu \n",vcpu_arch->this_tsc_nsec);
+	print_record(log_file, "arch.this_tsc_write=%llu \n",vcpu_arch->this_tsc_write);
+	print_record(log_file, "arch.this_tsc_generation=%u \n",vcpu_arch->this_tsc_generation);
+	print_record(log_file, "arch.tsc_catchup=%d \n",vcpu_arch->tsc_catchup);
+	print_record(log_file, "arch.tsc_always_catchup=%d \n",vcpu_arch->tsc_always_catchup);
+	print_record(log_file, "arch.virtual_tsc_shift=%d \n",vcpu_arch->virtual_tsc_shift);
+	print_record(log_file, "arch.virtual_tsc_mult=%lu \n",vcpu_arch->virtual_tsc_mult);
+	print_record(log_file, "arch.virtual_tsc_khz=%lu \n",vcpu_arch->virtual_tsc_khz);
+	print_record(log_file, "arch.ia32_tsc_adjust_msr=%lld \n",vcpu_arch->ia32_tsc_adjust_msr);
+
+	print_record(log_file, "arch.nmi_queued.counter=%d \n",vcpu_arch->nmi_queued.counter);
+	print_record(log_file, "arch.nmi_pending=%lu \n",vcpu_arch->nmi_pending);
+	print_record(log_file, "arch.nmi_injected=%d \n",vcpu_arch->nmi_injected);
+
+	//mtrr_state
+	for (i = 0; i < 256; i++){
+		if (0 != vcpu_arch->mtrr_state.var_ranges[i].base_hi)
+			print_record(log_file, "arch.mtrr_state.var_ranges[%d].base_hi=%lu  ",i ,vcpu_arch->mtrr_state.var_ranges[i].base_hi);
+		if (0 != vcpu_arch->mtrr_state.var_ranges[i].base_lo)
+			print_record(log_file, "arch.mtrr_state.var_ranges[%d].base_lo=%lu  ",i ,vcpu_arch->mtrr_state.var_ranges[i].base_lo);
+		if (0 != vcpu_arch->mtrr_state.var_ranges[i].mask_hi)
+			print_record(log_file, "arch.mtrr_state.var_ranges[%d].mask_hi=%lu  ",i ,vcpu_arch->mtrr_state.var_ranges[i].mask_hi);	
+		if (0 != vcpu_arch->mtrr_state.var_ranges[i].mask_lo)
+			print_record(log_file, "arch.mtrr_state.var_ranges[%d].mask_lo=%lu  ",i ,vcpu_arch->mtrr_state.var_ranges[i].mask_lo);		
+	}
+	print_record(log_file, "\n");
+	for (i = 0; i < 88; i++)
+		if (0 != vcpu_arch->mtrr_state.fixed_ranges[i])
+			print_record(log_file, "arch.mtrr_state.fixed_ranges[%d]=%u  ",i ,vcpu_arch->mtrr_state.fixed_ranges[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "arch.mtrr_state.enabled=%u  \n",vcpu_arch->mtrr_state.enabled);
+	print_record(log_file, "arch.mtrr_state.have_fixed=%u  \n",vcpu_arch->mtrr_state.have_fixed);
+	print_record(log_file, "arch.mtrr_state.def_type=%u  \n",vcpu_arch->mtrr_state.def_type);
+
+	print_record(log_file, "arch.pat=%lu  \n",vcpu_arch->pat);
+	print_record(log_file, "arch.switch_db_regs=%d  \n",vcpu_arch->switch_db_regs);
+	for (i = 0; i < 4; i++)
+		if (0 != vcpu_arch->db[i])
+			print_record(log_file, "arch.db[%d]=%lu  ",i ,vcpu_arch->db[i]);	
+	print_record(log_file, "\n");
+	print_record(log_file, "arch.dr6=%lu  \n",vcpu_arch->dr6);
+	print_record(log_file, "arch.dr7=%lu  \n",vcpu_arch->dr7);
+	for (i = 0; i < 4; i++)
+		if (0 != vcpu_arch->eff_db[i])
+			print_record(log_file, "arch.eff_db[%d]=%lu  ",i ,vcpu_arch->eff_db[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "arch.guest_debug_dr7=%lu  \n",vcpu_arch->guest_debug_dr7);
+	
+	print_record(log_file, "arch.mcg_cap=0x%llx  \n",vcpu_arch->mcg_cap);
+	print_record(log_file, "arch.mcg_status=0x%llx  \n",vcpu_arch->mcg_status);
+	print_record(log_file, "arch.mcg_ctl=0x%llx  \n",vcpu_arch->mcg_ctl);
+
+	if (vcpu_arch->mce_banks)
+		print_record(log_file, "arch.(*mce_banks)=0x%llx  \n",*(vcpu_arch->mce_banks));
+
+	//Cache MMIO info 
+	print_record(log_file, "arch.mmio_gva=0x%llx  \n",vcpu_arch->mmio_gva);
+	print_record(log_file, "arch.access=%u  \n",vcpu_arch->access);
+	print_record(log_file, "arch.mmio_gfn=0x%llx  \n",vcpu_arch->mmio_gfn);
+
+	//pmu
+	print_record(log_file, "arch.pmu.nr_arch_gp_counters=%u  \n",vcpu_arch->pmu.nr_arch_gp_counters);
+	print_record(log_file, "arch.pmu.nr_arch_fixed_counters=%u  \n",vcpu_arch->pmu.nr_arch_fixed_counters);
+	print_record(log_file, "arch.pmu.available_event_types=%u  \n",vcpu_arch->pmu.available_event_types);
+	print_record(log_file, "arch.pmu.fixed_ctr_ctrl=0x%llx  \n",vcpu_arch->pmu.fixed_ctr_ctrl);
+	print_record(log_file, "arch.pmu.global_ctrl=0x%llx  \n",vcpu_arch->pmu.global_ctrl);
+	print_record(log_file, "arch.pmu.global_status=0x%llx  \n",vcpu_arch->pmu.global_status);
+	print_record(log_file, "arch.pmu.global_ovf_ctrl=0x%llx  \n",vcpu_arch->pmu.global_ovf_ctrl);
+	print_record(log_file, "arch.pmu.counter_bitmask[0]=0x%llx  \n",vcpu_arch->pmu.counter_bitmask[0]);
+	print_record(log_file, "arch.pmu.counter_bitmask[1]=0x%llx  \n",vcpu_arch->pmu.counter_bitmask[1]);
+	print_record(log_file, "arch.pmu.global_ctrl_mask=0x%llx  \n",vcpu_arch->pmu.global_ctrl_mask);
+	print_record(log_file, "arch.pmu.version=%u  \n",vcpu_arch->pmu.version);
+	for (i = 0; i < 32; i++){
+		switch (vcpu_arch->pmu.gp_counters[i].type){
+		case 0:
+			print_record(log_file, "vcpu_arch->pmu.gp_counters[i].type=|KVM_PMC_GP = 0|\n");
+			break;
+		case 1:
+			print_record(log_file, "cpu_arch->pmu.gp_counters[i].type=KVM_PMC_FIXED\n");
+			break;
+		default:
+			print_record(log_file, "cpu_arch->pmu.gp_counters[i].type is ERROR!\n");
+			break;
+		}		
+		print_record(log_file, "arch.pmu.gp_counters[%d].idx=%u  \n",i ,vcpu_arch->pmu.gp_counters[i].idx);
+		print_record(log_file, "arch.pmu.gp_counters[%d].counter=%llu  \n",i ,vcpu_arch->pmu.gp_counters[i].counter);
+		print_record(log_file, "arch.pmu.gp_counters[%d].eventsel=%llu  \n",i ,vcpu_arch->pmu.gp_counters[i].eventsel);
+		print_record(log_file, "arch.pmu.gp_counters[%d].perf_event(pointer!)=0x%llx  \n",i ,vcpu_arch->pmu.gp_counters[i].perf_event);
+		print_record(log_file, "arch.pmu.gp_counters[%d].vcpu(pointer!)=0x%llx  \n",i ,vcpu_arch->pmu.gp_counters[i].vcpu);
+	}
+	for (i = 0; i < 3; i++){
+		switch (vcpu_arch->pmu.fixed_counters[i].type){
+		case 0:
+			print_record(log_file, "vcpu_arch->pmu.fixed_counters[i].type=|KVM_PMC_GP = 0|\n");
+			break;
+		case 1:
+			print_record(log_file, "cpu_arch->pmu.fixed_counters[i].type=KVM_PMC_FIXED\n");
+			break;
+		default:
+			print_record(log_file, "cpu_arch->pmu.fixed_counters[i].type is ERROR!\n");
+			break;
+		}
+		print_record(log_file, "arch.pmu.fixed_counters[%d].idx=%u  \n",i ,vcpu_arch->pmu.fixed_counters[i].idx);
+		print_record(log_file, "arch.pmu.fixed_counters[%d].counter=%llu  \n",i ,vcpu_arch->pmu.fixed_counters[i].counter);
+		print_record(log_file, "arch.pmu.fixed_counters[%d].eventsel=%llu  \n",i ,vcpu_arch->pmu.fixed_counters[i].eventsel);
+		print_record(log_file, "arch.pmu.fixed_counters[%d].perf_event(pointer!)=0x%llx  \n",i ,vcpu_arch->pmu.fixed_counters[i].perf_event);
+		print_record(log_file, "arch.pmu.fixed_counters[%d].vcpu(pointer!)0x%llx=  \n",i ,vcpu_arch->pmu.fixed_counters[i].vcpu);
+	}
+	print_record(log_file, "arch.pmu.irq_work.flags=%lu	\n",vcpu_arch->pmu.irq_work.flags);
+	print_record(log_file, "arch.pmu.reprogram_pmi=0x%llx  \n",vcpu_arch->pmu.reprogram_pmi);
+
+	print_record(log_file, "arch.pmu.singlestep_rip=%lu  \n",vcpu_arch->singlestep_rip);
+
+	print_record(log_file, "arch.pmu.last_retry_eip=%lu  \n",vcpu_arch->last_retry_eip);
+	print_record(log_file, "arch.pmu.last_retry_addr=%lu  \n",vcpu_arch->last_retry_addr);
+
+	//apf
+	print_record(log_file, "arch.apf.halted=%d  \n",vcpu_arch->apf.halted);
+	print_record(log_file, "arch.apf.msr_val=%llu  \n",vcpu_arch->apf.msr_val);
+	print_record(log_file, "arch.apf.id=%lu  \n",vcpu_arch->apf.id);
+	print_record(log_file, "arch.apf.send_user_only=%d  \n",vcpu_arch->apf.send_user_only);
+	for (i = 0; i < 64; i++)
+		if (0 != vcpu_arch->apf.gfns[i])
+			print_record(log_file, "arch.apf.gfns[%d]=0x%llx  ",i ,vcpu_arch->apf.gfns[i]);
+	print_record(log_file, "\n");
+	print_record(log_file, "arch.apf.data.generation=%llu  \n",vcpu_arch->apf.data.generation);
+	print_record(log_file, "arch.apf.data.gpa=0x%llx  \n",vcpu_arch->apf.data.gpa);
+	print_record(log_file, "arch.apf.data.hva=0x%lx  \n",vcpu_arch->apf.data.hva);
+	print_record(log_file, "arch.apf.data.len=%lu  \n",vcpu_arch->apf.data.len);
+	print_record(log_file, "arch.apf.data.memslot(pointer!)=0x%llx  \n",vcpu_arch->apf.data.memslot);
+
+	print_record(log_file, "arch.osvw.length=0x%llx  \n",vcpu_arch->osvw.length);
+	print_record(log_file, "arch.osvw.status=0x%llx  \n",vcpu_arch->osvw.status);
+
+	//pv_eoi
+	print_record(log_file, "arch.pv_eoi.msr_val=0x%llx  \n",vcpu_arch->pv_eoi.msr_val);
+	print_record(log_file, "arch.pv_eoi.data.generation=%llu  \n",vcpu_arch->pv_eoi.data.generation);
+	print_record(log_file, "arch.pv_eoi.data.gpa=0x%llx  \n",vcpu_arch->pv_eoi.data.gpa);
+	print_record(log_file, "arch.pv_eoi.data.hva=0x%lx  \n",vcpu_arch->pv_eoi.data.hva);
+	print_record(log_file, "arch.pv_eoi.data.len=%lu  \n",vcpu_arch->pv_eoi.data.len);
+	print_record(log_file, "arch.pv_eoi.data.memslot(pointer!)=0x%llx  \n",vcpu_arch->pv_eoi.data.memslot);	
+
+	print_record(log_file, "arch.write_fault_to_shadow_pgtable=%d  \n",vcpu_arch->write_fault_to_shadow_pgtable);
+
+	//Tamlok
+	print_record(log_file, "arch.nr_private_pages=%d  \n",vcpu_arch->nr_private_pages);
+	print_record(log_file, "arch.private_pages.next=0x%llx  \n",vcpu_arch->private_pages.next);
+	print_record(log_file, "arch.private_pages.prev=0x%llx  \n",vcpu_arch->private_pages.prev);
+
+}
+//end rsr-debug
+
+
 static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 {
 	int r;
@@ -5886,39 +6495,19 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	struct rr_event *e;
 	struct rr_event *tmp;
 
-	struct kvm_lapic_state *s;
-	int i, print_count;
+	//rsr-debug
+	int commit_flag, ret;
 
 restart:
-
-	/*if (kvm_record){
-		print_count = 0;
-		for (i=0; i<8; i++)
-			if( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) || 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-				print_count = 1;
-		if (print_count){
-			print_record("after restart:  ");
-			print_record("ISR:  ");
-			
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) )
-					print_record("[%d]=0x%8x  ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
-			print_record("IRR:  ");
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-					print_record("[%d]=0x%8x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
-			print_record("APIC_PROCPRI=0x%x , ", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-			print_record("APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
-		}
-		//printk("after restart!\n");
-	}*/
 	
 	if (vcpu->requests) {	// Check if there is any requests which are not handled.
 		// XELATEX
 		//printk("before enter -- Check request\n");
 		
 		if (kvm_check_request(KVM_REQ_RECORD, vcpu) && vcpu->is_kicked) {
-			//printk(KERN_ERR "XELATEX - get request KVM_REQ_RECORD");
+#ifdef CONFIG_RSR_BASIC_DEBUG
+			print_record(vcpu->vcpu_id, "XELATEX - get request KVM_REQ_RECORD");
+#endif
 			if (kvm_x86_ops)
 				kvm_x86_ops->tm_commit(vcpu, 0);
 			else
@@ -5949,7 +6538,7 @@ restart:
 		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {	// deal with triple fault? exit to qemu to reboot? these triple fault means the fault happens in KVM (eg. during deliver interrupt)?
 			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
 			r = 0;
-			print_record("TRIPLE_FAULT_ERROR! Disable kvm_record\n");
+			print_record(vcpu->vcpu_id, "TRIPLE_FAULT_ERROR! Disable kvm_record\n");
 			kvm_record = false;
 			printk("TRIPLE_FAULT_ERROR! kvm_record = false\n");
 			goto out;
@@ -5981,13 +6570,13 @@ restart:
 	if (kvm_record && vcpu->need_chkpt) {		// make checkpoint
 		mutex_lock(&(vcpu->events_list_lock));
 		vcpu_checkpoint(vcpu);
-		//printk("before enter -- vcpu_checkpoint\n");
-
 		list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {		//delete all events in the event list because it already be committed
 			list_del(&(e->link));
 			kfree(e);
-			print_record("XELATEX - %s, %d, commit-- delete events, delivery_mode=%d, vector=%d\n"
-						, __func__, __LINE__, e->delivery_mode, e->vector);
+#ifdef CONFIG_RSR_APIC_DEBUG
+			print_record(vcpu->vcpu_id, "commit-- delete events, delivery_mode=%d, vector=%d\n"
+						, e->delivery_mode, e->vector);
+#endif
 		}
 		mutex_unlock(&(vcpu->events_list_lock));
 	}
@@ -6002,41 +6591,27 @@ restart:
 			goto out;
 		}
 
-		/*if (kvm_record){
-			//print_record("\t XELATEX - %s, %d, priority, apic prio=0x%x.\n",
-			//		__func__, __LINE__, kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-			print_count = 0;
-			for (i=0; i<8; i++)
-				if( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) || 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-					print_count = 1;
-			if (print_count){
-				print_record("before injected:   ");
-				print_record("ISR:   ");
-				for (i=0; i<8; i++)
-					if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) )
-						print_record("[%d]=0x%8x   ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
-				print_record("IRR:   ");
-				for (i=0; i<8; i++)
-					if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-						print_record("[%d]=0x%8x   ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
-				print_record("APIC_PROCPRI=0x%x , ", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-				print_record("APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
-
-			}
-		}*/
-
 		r = inject_pending_event(vcpu);										//inject pending events that recived from last vmentre to vmexit
 
-		/*if (kvm_record){
-			print_record("vcpu->request=%lu \n ", vcpu->requests);
-			if (r==0)
-				print_record("0 = inject_pending_event\n");
+#ifdef CONFIG_RSR_APIC_DEBUG
+		if (kvm_record){
+			print_record(vcpu->vcpu_id, "inject_pending_event return %d ", r);
+			if (r == 0)
+				print_record(vcpu->vcpu_id, "\n", r);
 			else{
-				print_record("XELATEX - %s, %d, inject_pending_event=%d\n", __func__, __LINE__, r);
-				print_record("arch.interrupt.pending=%d, arch.interrupt.soft=%d, arch.interrupt.nr=%d \n",vcpu->arch.interrupt.pending, vcpu->arch.interrupt.soft, vcpu->arch.interrupt.nr );
+				if (r == 1){
+					print_record(vcpu->vcpu_id, "arch.exception.pending=%d, arch.exception.reinject=%d, arch.exception.nr=%d "\
+						"vcpu->arch.exception.has_error_code = %d, vcpu->arch.exception.error_code = %d \n",
+						vcpu->arch.exception.pending, vcpu->arch.exception.reinject, vcpu->arch.exception.nr,
+						vcpu->arch.exception.has_error_code, vcpu->arch.exception.error_code);
+				}
+				else{					
+					print_record(vcpu->vcpu_id, "arch.interrupt.pending=%d, arch.interrupt.soft=%d, arch.interrupt.nr=%d \n",
+						vcpu->arch.interrupt.pending, vcpu->arch.interrupt.soft, vcpu->arch.interrupt.nr );
+				}
 			}
-
-		}*/
+		}
+#endif
 
 		/* enable NMI/IRQ window open exits if needed */
 		if (vcpu->arch.nmi_pending)
@@ -6093,9 +6668,10 @@ restart:
 		r = 1;
 
 		if (kvm_record)
-			print_record("!!Enter failed!! vcpu->mode=%d || vcpu->requests=%lu || need_resched=%d || signal_pending(current)=%d\n"
+#ifdef CONFIG_RSR_BASIC_DEBUG
+			print_record(vcpu->vcpu_id, "!!Enter failed!! vcpu->mode=%d || vcpu->requests=0x%lx || need_resched=%d || signal_pending(current)=%d\n"
 						, vcpu->mode, vcpu->requests, need_resched(), signal_pending(current));
-		
+#endif		
 		goto cancel_injection;
 	}
 
@@ -6115,6 +6691,15 @@ restart:
 	}
 
 	trace_kvm_entry(vcpu->vcpu_id);
+
+	//rsr-debug just for debugging, should be deleted later
+	if (0 != vcpu->print_flag){
+		//print_record(vcpu->print_flag, "vcpu->nr_test = %d\n", vcpu->nr_test);
+		print_record(vcpu->print_flag, "-------------------------vcpu->nr_test=%d-----------------------\n", vcpu->nr_test);
+		print_cpu_arch_info_for_debugging(vcpu, vcpu->print_flag);
+		vcpu->print_flag = 0;
+	}
+	
 	kvm_x86_ops->run(vcpu);
 
 	/*
@@ -6170,57 +6755,51 @@ restart:
 	if (kvm_record || vcpu->is_recording) {
 		vcpu->need_chkpt = 0;
 
-		/*print_count = 0;
-		for (i=0; i<8; i++)
-			if( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) || 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-				print_count = 1;
-		if (print_count){
-			print_record("before exit:   ");
-			print_record("ISR:  ");
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) )
-					print_record("[%d]=0x%8x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
-			print_record("IRR:   ");
-			for (i=0; i<8; i++)
-				if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-					print_record("[%d]=0x%8x  ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
-			print_record("APIC_PROCPRI=0x%x , ", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-			print_record("APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
-
-		}*/
-
-		r = kvm_x86_ops->check_rr_commit(vcpu);
+		commit_flag = kvm_x86_ops->check_rr_commit(vcpu);
 		// Only for test
-		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR)
-			r = ((++vcpu->nr_test) % 2 == 0);
-		if (r == KVM_RR_COMMIT) {
-			print_record("KVM_RR_COMMIT\n");
-			//printk("after exit -- KVM_RR_COMMIT\n");
-
-			kvm_x86_ops->tm_memory_commit(vcpu);
-			vcpu->need_chkpt = 1;
+		
+		if (commit_flag != KVM_RR_SKIP && commit_flag != KVM_RR_ERROR){
+			commit_flag = ((++vcpu->nr_test) % 20 == 19) ;		//rollback once after commit 19 times
+			//commit_flag = KVM_RR_COMMIT;						//commit everytime without rollback
+			if (vcpu->nr_test >= 10000 ){
+				printk("10000 quantum!!! and it still run... \n");
+				vcpu->nr_test = 0;
+			}
 		}
-		else if (r == KVM_RR_ROLLBACK) {
-			print_record("KVM_RR_ROLLBACK\n");
-			//printk("after exit -- KVM_RR_ROLLBACK\n");
-
+		if (commit_flag == KVM_RR_COMMIT) {
+#ifdef CONFIG_RSR_BASIC_DEBUG
+			print_record(vcpu->vcpu_id, "=================after exit -- KVM_RR_COMMIT=================\n");
+#endif
+			kvm_x86_ops->tm_memory_commit(vcpu);
+			//vcpu->need_chkpt = 0;
+			vcpu->need_chkpt = 1;
+			//rsr-debug just for debugging, should be deleted later
+			if ((vcpu->nr_test) % 20 == 18) 
+				vcpu->print_flag = 1;
+		}
+		else if (commit_flag == KVM_RR_ROLLBACK) {
+#ifdef CONFIG_RSR_BASIC_DEBUG		
+			print_record(vcpu->vcpu_id, "=================after exit -- KVM_RR_ROLLBACK=================\n");
+#endif
 			kvm_x86_ops->tm_memory_rollback(vcpu);
 				
 			vcpu_rollback(vcpu);
-			//printk("after exit -- vcpu_rollback\n");
-
+			
 			//rsr-debug
 			mutex_lock(&(vcpu->events_list_lock));
 			//end rsr-debug
 			list_for_each_entry_safe(e, tmp, &(vcpu->events_list), link) {
-				r = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
+				ret = kvm_x86_ops->rr_apic_accept_irq(vcpu->arch.apic, e->delivery_mode,
 						e->vector, e->level, e->trig_mode, e->dest_map);
-				print_record("rollback--add events delivery_mode=%d, vector=%d, result=%d\n",
-						e->delivery_mode, e->vector, r);
+#ifdef CONFIG_RSR_APIC_DEBUG
+				print_record(vcpu->vcpu_id, "rollback--add events delivery_mode=%d, vector=%d, result=%d\n",
+						e->delivery_mode, e->vector, ret);
+#endif
 			}
 			mutex_unlock(&(vcpu->events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-			
+			//rsr-debug just for debugging, should be deleted later
+			vcpu->print_flag = 2;
 			goto restart;
 		}
 	}
@@ -6228,7 +6807,9 @@ restart:
 	r = kvm_x86_ops->handle_exit(vcpu);
 
 	if (vcpu->run->exit_reason == KVM_EXIT_SHUTDOWN){
-		print_record("SHUTDOWN! Disable kvm_record\n");
+#ifdef CONFIG_RSR_BASIC_DEBUG
+		print_record(vcpu->vcpu_id, "SHUTDOWN! Disable kvm_record\n");
+#endif
 		kvm_record = false;
 		printk("kvm_record = false\n");
 	}
@@ -6236,6 +6817,11 @@ restart:
 	return r;
 
 cancel_injection:
+	//rsr-debug  if we failed to enter guest, we do not need to make another checkpoint
+	//1 Do we need to do this?
+	vcpu->need_chkpt = 0;
+	//end rsr-debug
+	
 	kvm_x86_ops->cancel_injection(vcpu);
 	if (unlikely(vcpu->arch.apic_attention))
 		kvm_lapic_sync_from_vapic(vcpu);
@@ -7157,6 +7743,9 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&(vcpu->events_list));
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->nr_test = 0;
+
+	//rsr-debug just for debugging, should be deleted later 
+	vcpu->print_flag = 0;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;

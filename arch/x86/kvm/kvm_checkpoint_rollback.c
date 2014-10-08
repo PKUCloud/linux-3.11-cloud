@@ -36,6 +36,11 @@ static int kvm_getset_regs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 {
     struct kvm_regs *kvm_regs = &env->kvm_regs;
     int ret = -ENOMEM;
+
+#ifdef CONFIG_RSR_CHECKPOINT_DEBUG
+	int log_file;
+#endif
+	
 	if (!set) {
 		memset(kvm_regs, 0, sizeof(struct kvm_regs));
 	}
@@ -43,28 +48,29 @@ static int kvm_getset_regs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 												 kvm_regs);
 	
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
-	print_record("cpu_regs:\n");
-	print_record("VCPU_REGS_RAX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RAX));
-	print_record("VCPU_REGS_RBX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RBX));
-	print_record("VCPU_REGS_RCX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RCX));
-	print_record("VCPU_REGS_RDX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RDX));
-	print_record("VCPU_REGS_RSI=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RSI));
-	print_record("VCPU_REGS_RDI=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RDI));
-	print_record("VCPU_REGS_RSP=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RSP));
-	print_record("VCPU_REGS_RBP=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RBP));
+	log_file = set + 1;
+	print_record(log_file, "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+	print_record(log_file, "cpu_regs:\n");
+	print_record(log_file, "VCPU_REGS_RAX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RAX));
+	print_record(log_file, "VCPU_REGS_RBX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RBX));
+	print_record(log_file, "VCPU_REGS_RCX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RCX));
+	print_record(log_file, "VCPU_REGS_RDX=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RDX));
+	print_record(log_file, "VCPU_REGS_RSI=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RSI));
+	print_record(log_file, "VCPU_REGS_RDI=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RDI));
+	print_record(log_file, "VCPU_REGS_RSP=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RSP));
+	print_record(log_file, "VCPU_REGS_RBP=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_RBP));
 #ifdef CONFIG_X86_64
-	print_record("VCPU_REGS_R8=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R8));
-	print_record("VCPU_REGS_R9=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R9));
-	print_record("VCPU_REGS_R10=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R10));
-	print_record("VCPU_REGS_R11=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R11));
-	print_record("VCPU_REGS_R12=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R12));
-	print_record("VCPU_REGS_R13=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R13));
-	print_record("VCPU_REGS_R14=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R14));
-	print_record("VCPU_REGS_R15=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R15));
+	print_record(log_file, "VCPU_REGS_R8=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R8));
+	print_record(log_file, "VCPU_REGS_R9=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R9));
+	print_record(log_file, "VCPU_REGS_R10=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R10));
+	print_record(log_file, "VCPU_REGS_R11=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R11));
+	print_record(log_file, "VCPU_REGS_R12=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R12));
+	print_record(log_file, "VCPU_REGS_R13=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R13));
+	print_record(log_file, "VCPU_REGS_R14=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R14));
+	print_record(log_file, "VCPU_REGS_R15=0x%lx\n",kvm_register_read(vcpu, VCPU_REGS_R15));
 #endif
-	print_record("regs->rip=0x%lx\n",kvm_rip_read(vcpu));
-	print_record("regs->rflags=0x%lx\n",kvm_get_rflags(vcpu));
+	print_record(log_file, "regs->rip=0x%lx\n",kvm_rip_read(vcpu));
+	print_record(log_file, "regs->rflags=0x%lx\n",kvm_get_rflags(vcpu));
 #endif
 	
 	return ret;
@@ -78,6 +84,7 @@ static int kvm_getset_fpu(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	struct i387_fxsave_struct *fxsave =	&vcpu->arch.guest_fpu.state->fxsave;
 	int i;
+	int log_file;
 #endif
 	
 	if (!set){
@@ -86,26 +93,28 @@ static int kvm_getset_fpu(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_FPU:KVM_GET_FPU, fpu);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("\ncpu_fpu\n");
-	print_record("cwd=0x%x\n",fxsave->cwd);
-	print_record("swd=0x%x\n",fxsave->swd);
-	print_record("twd=0x%x\n",fxsave->twd);
-	print_record("fop=0x%x\n",fxsave->fop);
+	log_file = set + 1;
+
+	print_record(log_file, "\ncpu_fpu\n");
+	print_record(log_file, "cwd=0x%x\n",fxsave->cwd);
+	print_record(log_file, "swd=0x%x\n",fxsave->swd);
+	print_record(log_file, "twd=0x%x\n",fxsave->twd);
+	print_record(log_file, "fop=0x%x\n",fxsave->fop);
 	
-	print_record("rip=0x%llx\n",fxsave->rip);
-	print_record("rdp=0x%llx\n",fxsave->rdp);
+	print_record(log_file, "rip=0x%llx\n",fxsave->rip);
+	print_record(log_file, "rdp=0x%llx\n",fxsave->rdp);
 	
-	print_record("mxcsr=0x%lx\n",fxsave->mxcsr);
-	print_record("mxcsr_mask=0x%lx\n",fxsave->mxcsr_mask);
+	print_record(log_file, "mxcsr=0x%lx\n",fxsave->mxcsr);
+	print_record(log_file, "mxcsr_mask=0x%lx\n",fxsave->mxcsr_mask);
 	
 	for (i = 0; i < 32; i++)
 		if (0 != fxsave->st_space[i])
-			print_record("st_space[%d]=0x%lx  ", i, fxsave->st_space[i]);
-	print_record("\n");
+			print_record(log_file, "st_space[%d]=0x%lx  ", i, fxsave->st_space[i]);
+	print_record(log_file, "\n");
 	for (i = 0; i < 64; i++)
 		if (0 != fxsave->xmm_space[i])
-			print_record("xmm_space[%d]=0x%lx  ", i, fxsave->xmm_space[i]);
-	print_record("\n");
+			print_record(log_file, "xmm_space[%d]=0x%lx  ", i, fxsave->xmm_space[i]);
+	print_record(log_file, "\n");
 
 #endif
 
@@ -120,6 +129,7 @@ static int kvm_getset_xsave(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	struct i387_fxsave_struct *fxsave =	&vcpu->arch.guest_fpu.state->fxsave;
 	int i;
+	int log_file;
 #endif
 
     if (!cpu_has_xsave) {
@@ -131,26 +141,28 @@ static int kvm_getset_xsave(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_XSAVE:KVM_GET_XSAVE,
 												 xsave);
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("\ncpu_xsave\n");
-	print_record("cwd=0x%x\n",fxsave->cwd);
-	print_record("swd=0x%x\n",fxsave->swd);
-	print_record("twd=0x%x\n",fxsave->twd);
-	print_record("fop=0x%x\n",fxsave->fop);
-	
-	print_record("rip=0x%llx\n",fxsave->rip);
-	print_record("rdp=0x%llx\n",fxsave->rdp);
+	log_file = set + 1;
 
-	print_record("mxcsr=0x%lx\n",fxsave->mxcsr);
-	print_record("mxcsr_mask=0x%lx\n",fxsave->mxcsr_mask);
+	print_record(log_file, "\ncpu_xsave\n");
+	print_record(log_file, "cwd=0x%x\n",fxsave->cwd);
+	print_record(log_file, "swd=0x%x\n",fxsave->swd);
+	print_record(log_file, "twd=0x%x\n",fxsave->twd);
+	print_record(log_file, "fop=0x%x\n",fxsave->fop);
+	
+	print_record(log_file, "rip=0x%llx\n",fxsave->rip);
+	print_record(log_file, "rdp=0x%llx\n",fxsave->rdp);
+
+	print_record(log_file, "mxcsr=0x%lx\n",fxsave->mxcsr);
+	print_record(log_file, "mxcsr_mask=0x%lx\n",fxsave->mxcsr_mask);
 
 	for (i = 0; i < 32; i++)
 		if (0 != fxsave->st_space[i])
-			print_record("st_space[%d]=0x%lx  ", i, fxsave->st_space[i]);
-	print_record("\n");
+			print_record(log_file, "st_space[%d]=0x%lx  ", i, fxsave->st_space[i]);
+	print_record(log_file, "\n");
 	for (i = 0; i < 64; i++)
 		if (0 != fxsave->xmm_space[i])
-			print_record("xmm_space[%d]=0x%lx  ", i, fxsave->xmm_space[i]);
-	print_record("\n");
+			print_record(log_file, "xmm_space[%d]=0x%lx  ", i, fxsave->xmm_space[i]);
+	print_record(log_file, "\n");
 #endif
 
     return ret;
@@ -159,6 +171,9 @@ static int kvm_getset_xsave(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 static int kvm_getset_xcrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 {
     struct kvm_xcrs *xcrs = &env->xcrs;
+#ifdef CONFIG_RSR_CHECKPOINT_DEBUG
+	int log_file;
+#endif
 
 	if (!cpu_has_xsave) {
 		return 0;
@@ -169,7 +184,8 @@ static int kvm_getset_xcrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_XCRS:KVM_GET_XCRS, xcrs);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("\nvcpu_xcr:\nvcpu->arch.xcr0=0x%llx\n", vcpu->arch.xcr0);
+	log_file = set + 1;
+	print_record(log_file, "\nvcpu_xcr:\nvcpu->arch.xcr0=0x%llx\n", vcpu->arch.xcr0);
 #endif
 
     return 0;
@@ -179,6 +195,10 @@ static int kvm_getset_mp_state(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 {
     struct kvm_mp_state *mp_state = &env->mp_state;
     int ret = -ENOMEM;
+#ifdef CONFIG_RSR_CHECKPOINT_DEBUG
+	int log_file;
+#endif
+
 	if (!set) {
 		memset(mp_state, 0, sizeof(struct kvm_mp_state));
 	}
@@ -186,7 +206,8 @@ static int kvm_getset_mp_state(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 												 mp_state);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("\nvcpu_mp_state:\nmp_state=%lx\n", vcpu->arch.mp_state);
+	log_file = set + 1;
+	print_record(log_file, "\nvcpu_mp_state:\nmp_state=%lx\n", vcpu->arch.mp_state);
 #endif
 
 
@@ -213,6 +234,10 @@ static int kvm_getset_apic(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	struct rsr_lapic *lapic = &env->lapic;
 	//end rsr-debug
 	int i, ret;
+#ifdef CONFIG_RSR_CHECKPOINT_DEBUG
+	int log_file;
+#endif
+
 	
 	if (!set) {
 		memset(lapic, 0, sizeof(struct rsr_lapic));
@@ -221,29 +246,31 @@ static int kvm_getset_apic(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_LAPIC:KVM_GET_LAPIC,
 													  lapic);
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-		print_record("\ncpu_apic:\nISR:");
+		log_file = set + 1;
+
+		print_record(log_file, "\ncpu_apic:\nISR:");
 		for (i=0; i<8; i++){
 			if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i) )
-				print_record("regs[%d]= 0x%x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
+				print_record(log_file, "regs[%d]= 0x%x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_ISR+ 0x10 * i));
 		}
-		print_record("\nIRR:");
+		print_record(log_file, "\nIRR:");
 		for (i=0; i<8; i++)
 			if ( 0 != kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i) )
-				print_record("regs[%d]= 0x%8x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
-		print_record("\napic->irr_pending=%d , ", vcpu->arch.apic->irr_pending );	
+				print_record(log_file, "regs[%d]= 0x%8x ", i, kvm_apic_get_reg(vcpu->arch.apic, APIC_IRR+ 0x10 * i));
+		print_record(log_file, "\napic->irr_pending=%d , ", vcpu->arch.apic->irr_pending );	
 
 
-		print_record("APIC_PROCPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
-		print_record("APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
+		print_record(log_file, "APIC_PROCPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_PROCPRI));
+		print_record(log_file, "APIC_TASKPRI=0x%x \n", kvm_apic_get_reg(vcpu->arch.apic, APIC_TASKPRI));
 
-		print_record("base_address=%lu \n", vcpu->arch.apic->base_address);
-		print_record("kvm_timer=%lld \n", vcpu->arch.apic->lapic_timer.period);
-		print_record("divide_count=%u \n", vcpu->arch.apic->divide_count);
-		print_record("isr_count=%d \n", vcpu->arch.apic->isr_count);
-		print_record("highest_isr_cache=%d \n", vcpu->arch.apic->highest_isr_cache);
-		print_record("vapic_addr=%llu \n",vcpu->arch.apic->vapic_addr);
-		print_record("pending_events=%lu \n", vcpu->arch.apic->pending_events);
-		print_record("sipi_vector=%u \n",vcpu->arch.apic->sipi_vector);
+		print_record(log_file, "base_address=%lu \n", vcpu->arch.apic->base_address);
+		print_record(log_file, "kvm_timer=%lld \n", vcpu->arch.apic->lapic_timer.period);
+		print_record(log_file, "divide_count=%u \n", vcpu->arch.apic->divide_count);
+		print_record(log_file, "isr_count=%d \n", vcpu->arch.apic->isr_count);
+		print_record(log_file, "highest_isr_cache=%d \n", vcpu->arch.apic->highest_isr_cache);
+		print_record(log_file, "vapic_addr=%llu \n",vcpu->arch.apic->vapic_addr);
+		print_record(log_file, "pending_events=%lu \n", vcpu->arch.apic->pending_events);
+		print_record(log_file, "sipi_vector=%u \n",vcpu->arch.apic->sipi_vector);
 #endif		
 		
 		return ret;
@@ -256,7 +283,8 @@ static int kvm_getset_debugregs(struct kvm_vcpu *vcpu, CPUX86State *env, int set
     struct kvm_debugregs *dbgregs = &env->dbgregs;
     int ret = -ENOMEM;
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	int i;
+	int i, log_file;
+
 #endif
 	
 
@@ -272,14 +300,16 @@ static int kvm_getset_debugregs(struct kvm_vcpu *vcpu, CPUX86State *env, int set
 												 dbgregs);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("\ndebug_regs:\nswitch_db_regs=%d \n", vcpu->arch.switch_db_regs);
+	log_file = set + 1;
+
+	print_record(log_file, "\ndebug_regs:\nswitch_db_regs=%d \n", vcpu->arch.switch_db_regs);
 	for (i = 0; i < 4; i++)
-		print_record("db[%d]=0x%lx ", i, vcpu->arch.db[i]);
-	print_record("\ndr6=0x%lx \n", vcpu->arch.dr6);
-	print_record("dr7=0x%lx \n", vcpu->arch.dr7);
+		print_record(log_file, "db[%d]=0x%lx ", i, vcpu->arch.db[i]);
+	print_record(log_file, "\ndr6=0x%lx \n", vcpu->arch.dr6);
+	print_record(log_file, "dr7=0x%lx \n", vcpu->arch.dr7);
 	for (i = 0; i < 4; i++)
-		print_record("eff_db[%d]=0x%lx ", i, vcpu->arch.eff_db[i]);
-	print_record("\nguest_debug_dr7=0x%lx \n", vcpu->arch.guest_debug_dr7);
+		print_record(log_file, "eff_db[%d]=0x%lx ", i, vcpu->arch.eff_db[i]);
+	print_record(log_file, "\nguest_debug_dr7=0x%lx \n", vcpu->arch.guest_debug_dr7);
 #endif
 	
     return ret;
@@ -289,6 +319,9 @@ static int kvm_getset_vcpu_events(struct kvm_vcpu *vcpu, CPUX86State *env, int s
 {
 	struct kvm_vcpu_events *events = &env->vcpu_events;
     int ret = -ENOMEM;
+#ifdef CONFIG_RSR_CHECKPOINT_DEBUG
+	int log_file;
+#endif	
 
 	//need to check if the core kvm API support this extensions
 	//if you really want to check if our vcpu has these regs, use func "kvm_dev_ioctl_check_extension"
@@ -304,23 +337,25 @@ static int kvm_getset_vcpu_events(struct kvm_vcpu *vcpu, CPUX86State *env, int s
 												 events);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("\nvcpu_events:\nexception->pending=%d\n", vcpu->arch.exception.pending);
-	print_record("exception->has_error_code=%d\n", vcpu->arch.exception.has_error_code);
-	print_record("exception->reinject=%d\n", vcpu->arch.exception.reinject);
-	print_record("exception->nr=%d\n", vcpu->arch.exception.nr);
-	print_record("exception->error_code=%d\n", vcpu->arch.exception.error_code);
-	
-	print_record("interrupt->pending=%d\n", vcpu->arch.interrupt.pending);
-	print_record("interrupt->soft=%d\n", vcpu->arch.interrupt.soft);
-	print_record("interrupt->nr=%d\n", vcpu->arch.interrupt.nr);
-	
-	print_record("nmi_queued=%d\n", vcpu->arch.nmi_queued.counter);
-	print_record("nmi_pending=%u\n", vcpu->arch.nmi_pending);
-	print_record("nmi_pending=%d\n", vcpu->arch.nmi_injected);
+	log_file = set + 1;
 
-	print_record("vcpu->arch.apic->sipi_vector=%lu\n", vcpu->arch.apic->sipi_vector);
-	print_record("kvm_x86_ops->get_nmi_mask=%d\n", kvm_x86_ops->get_nmi_mask(vcpu));
-	print_record("kvm_x86_ops->get_interrupt_shadow=%d\n", kvm_x86_ops->get_interrupt_shadow(vcpu,	KVM_X86_SHADOW_INT_MOV_SS | KVM_X86_SHADOW_INT_STI));
+	print_record(log_file, "\nvcpu_events:\nexception->pending=%d\n", vcpu->arch.exception.pending);
+	print_record(log_file, "exception->has_error_code=%d\n", vcpu->arch.exception.has_error_code);
+	print_record(log_file, "exception->reinject=%d\n", vcpu->arch.exception.reinject);
+	print_record(log_file, "exception->nr=%d\n", vcpu->arch.exception.nr);
+	print_record(log_file, "exception->error_code=%d\n", vcpu->arch.exception.error_code);
+	
+	print_record(log_file, "interrupt->pending=%d\n", vcpu->arch.interrupt.pending);
+	print_record(log_file, "interrupt->soft=%d\n", vcpu->arch.interrupt.soft);
+	print_record(log_file, "interrupt->nr=%d\n", vcpu->arch.interrupt.nr);
+	
+	print_record(log_file, "nmi_queued=%d\n", vcpu->arch.nmi_queued.counter);
+	print_record(log_file, "nmi_pending=%u\n", vcpu->arch.nmi_pending);
+	print_record(log_file, "nmi_pending=%d\n", vcpu->arch.nmi_injected);
+
+	print_record(log_file, "vcpu->arch.apic->sipi_vector=%lu\n", vcpu->arch.apic->sipi_vector);
+	print_record(log_file, "kvm_x86_ops->get_nmi_mask=%d\n", kvm_x86_ops->get_nmi_mask(vcpu));
+	print_record(log_file, "kvm_x86_ops->get_interrupt_shadow=%d\n", kvm_x86_ops->get_interrupt_shadow(vcpu,	KVM_X86_SHADOW_INT_MOV_SS | KVM_X86_SHADOW_INT_STI));
 
 #endif
 
@@ -335,6 +370,7 @@ static int kvm_getset_sregs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	struct kvm_sregs sergs_debug;
 	struct kvm_segment *seg;
+	int log_file;
 #endif
 	
 	if (!set) {
@@ -343,51 +379,61 @@ static int kvm_getset_sregs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_SREGS:KVM_GET_SREGS, sregs);
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
+	log_file = set + 1;
+
 	kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, KVM_GET_SREGS, &sergs_debug);
 
-	print_record("\nvcpu_sregs:\n");
+	print_record(log_file, "\nvcpu_sregs:\n");
 	seg = &(sergs_debug.cs);
-	print_record("cs: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);
+	if (seg->unusable != 1)
+		print_record(log_file, "cs: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);
 	seg = &(sergs_debug.ds);
-	print_record("ds: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);	
+	if (seg->unusable != 1)	
+		print_record(log_file, "ds: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);	
 	seg = &(sergs_debug.es);
-	print_record("es: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);	
+	if (seg->unusable != 1)	
+		print_record(log_file, "es: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);	
 	seg = &(sergs_debug.fs);
-	print_record("fs: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);	
+	if (seg->unusable != 1)	
+		print_record(log_file, "fs: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);	
 	seg = &(sergs_debug.gs);
-	print_record("gs: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);		
+	if (seg->unusable != 1)	
+		print_record(log_file, "gs: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);		
 	seg = &(sergs_debug.ss);
-	print_record("ss: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);	
+	if (seg->unusable != 1)	
+		print_record(log_file, "ss: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);	
 	seg = &(sergs_debug.tr);
-	print_record("tr: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);	
+	if (seg->unusable != 1)	
+		print_record(log_file, "tr: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);	
 	seg = &(sergs_debug.ldt);
-	print_record("ldt: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
-				, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
-				, seg->l, seg->g, seg->avl, seg->unusable);	
+	if (seg->unusable != 1)	
+		print_record(log_file, "ldt: base=0x%llx, limit=%lu, selector=%u, type=%u, present=%u, dpl=%u, db=%u, s=%u, l=%u, g=%u, avl=%u, unusable=%u\n"
+					, seg->base, seg->limit, seg->selector, seg->type, seg->present, seg->dpl, seg->db, seg->s
+					, seg->l, seg->g, seg->avl, seg->unusable);	
 
-	print_record("gdt: base=0x%llx, limit=%u\n", sergs_debug.gdt.base, sergs_debug.gdt.limit);
-	print_record("idt: base=0x%llx, limit=%u\n", sergs_debug.idt.base, sergs_debug.idt.limit);
+	print_record(log_file, "gdt: base=0x%llx, limit=%u\n", sergs_debug.gdt.base, sergs_debug.gdt.limit);
+	print_record(log_file, "idt: base=0x%llx, limit=%u\n", sergs_debug.idt.base, sergs_debug.idt.limit);
 
-	print_record("cr0=0x%llx, cr2=0x%llx, cr3=0x%llx, cr4=0x%llx, cr8=0x%llx\n", sergs_debug.cr0, sergs_debug.cr2
+	print_record(log_file, "cr0=0x%llx, cr2=0x%llx, cr3=0x%llx, cr4=0x%llx, cr8=0x%llx\n", sergs_debug.cr0, sergs_debug.cr2
 				, sergs_debug.cr3, sergs_debug.cr4, sergs_debug.cr8);
 
-	print_record("efer=0x%llx, apic_base=0x%llx\n", sergs_debug.efer, sergs_debug.apic_base);	
+	print_record(log_file, "efer=0x%llx, apic_base=0x%llx\n", sergs_debug.efer, sergs_debug.apic_base);	
 
-	print_record("interrupt_bitmap--1=0x%llx, 2=0x%llx, 3=0x%llx, 4=0x%llx\n", sergs_debug.interrupt_bitmap[0]
+	print_record(log_file, "interrupt_bitmap--1=0x%llx, 2=0x%llx, 3=0x%llx, 4=0x%llx\n", sergs_debug.interrupt_bitmap[0]
 				, sergs_debug.interrupt_bitmap[1], sergs_debug.interrupt_bitmap[2], sergs_debug.interrupt_bitmap[3]);
 #endif	
 	
@@ -403,6 +449,7 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
 	struct MSRdata msr_data_debug;
+	int log_file;
 #endif
 	
 	if (!set) {
@@ -426,18 +473,21 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 		msrs[n++].index = MSR_IA32_TSCDEADLINE;
 		msrs[n++].index = MSR_IA32_MISC_ENABLE;
 
-		//do we need to record timestamp?
-		msrs[n++].index = MSR_IA32_TSC;
-
 #ifdef CONFIG_X86_64
-
 		msrs[n++].index = MSR_CSTAR;
 		msrs[n++].index = MSR_KERNEL_GS_BASE;
-
 		msrs[n++].index = MSR_SYSCALL_MASK;
 		msrs[n++].index = MSR_LSTAR;
-		
 #endif
+		//do we need to record timestamp?
+        /*
+        	* KVM is yet unable to synchronize TSC values of multiple VCPUs on
+         	* writeback. Until this is fixed, we only write the offset to SMP
+        	* guests after migration, desynchronizing the VCPUs, but avoiding
+        	* huge jump-backs that would occur without any writeback at all.
+         	*/		
+		msrs[n++].index = MSR_IA32_TSC;
+
 
 		/*
 		 * The following paravirtual MSRs have side effects on the guest or are
@@ -453,19 +503,24 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
          * huge jump-backs that would occur without any writeback at all.
          */
 
+		//same as MSR_KVM_SYSTEM_TIME_NEW. Use that instead.
+		msrs[n++].index = MSR_KVM_SYSTEM_TIME_NEW;
 		/*same as MSR_KVM_WALL_CLOCK_NEW. Use that instead.
 		  *The hypervisor is only guaranteed to update this data at the moment of MSR write.
 		  *Note that although MSRs are per-CPU entities, the effect of this particular MSR is global.
 		  */
 		msrs[n++].index = MSR_KVM_WALL_CLOCK_NEW;
-		//same as MSR_KVM_SYSTEM_TIME_NEW. Use that instead.
-		msrs[n++].index = MSR_KVM_SYSTEM_TIME_NEW;
-		if (kvm_has_feature(KVM_FEATURE_ASYNC_PF)) {
-			msrs[n++].index = MSR_KVM_ASYNC_PF_EN;
-		}
-		if (kvm_has_feature(KVM_FEATURE_PV_EOI)) {
-			msrs[n++].index = MSR_KVM_PV_EOI_EN;
-		}
+
+		//if (kvm_has_feature(KVM_FEATURE_ASYNC_PF)) {
+		msrs[n++].index = MSR_KVM_ASYNC_PF_EN;
+		//}
+		//if (kvm_has_feature(KVM_FEATURE_PV_EOI)) {
+		msrs[n++].index = MSR_KVM_PV_EOI_EN;
+		//}
+
+		//msrs[n++].index = HV_X64_MSR_GUEST_OS_ID;
+		//msrs[n++].index = HV_X64_MSR_HYPERCALL;
+		//msrs[n++].index = HV_X64_MSR_APIC_ASSIST_PAGE;
 
 		mcg_cap = vcpu->arch.mcg_cap;	//need to confirm!!!
 
@@ -485,21 +540,28 @@ static int kvm_getset_msrs(struct kvm_vcpu *vcpu, CPUX86State *env, int set)
 
 	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, set?KVM_SET_MSRS:KVM_GET_MSRS, msr_data);
 
-/*
+
 #ifdef CONFIG_RSR_CHECKPOINT_DEBUG
-	print_record("\nMSR: ret=%d\n", ret);
+	log_file = set + 1;
+
+	print_record(log_file, "\nMSR: ret=%d\n", ret);
 	memset(&msr_data_debug, 0 , sizeof(MSRdata));
-	for (i = 0; i < ret; i++)
-		msr_data_debug.entries[i].index = msrs[i].index;
-	msr_data_debug.info.nmsrs = ret;
+	for (i = 0; i < ret; i++){
+		if (msrs[i].index != MSR_IA32_TSC)
+			msr_data_debug.entries[i].index = msrs[i].index;
+	}
+	//although we can't rollback MSR_KVM_ASYNC_PF_EN, 
+	//we should also test if it will stay same in every chunk
+	msr_data_debug.entries[i++].index = MSR_KVM_ASYNC_PF_EN;
+	msr_data_debug.info.nmsrs = ret + 1;
 	
-	kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, KVM_GET_MSRS, &msr_data_debug);
+	ret = kvm_arch_vcpu_ioctl_to_make_checkpoint(vcpu, KVM_GET_MSRS, &msr_data_debug);
 	for (i = 0; i < ret; i++)
-		print_record("msr[%d].index=%u, data=0x%llx\n"
+		print_record(log_file, "msr[%d].index=%u, data=0x%llx\n"
 					, i, msr_data_debug.entries[i].index, msr_data_debug.entries[i].data);
 
 #endif
-*/
+
 
     return 0;
 }

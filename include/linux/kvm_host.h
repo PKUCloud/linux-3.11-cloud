@@ -322,6 +322,9 @@ struct kvm_vcpu {
 	struct CPUX86State vcpu_checkpoint;
 	int check_rollback;
 	//end kvm_vcpu_checkpoint_rollback rsr
+
+	//rsr-debug just for debugging, should be deleted later
+	int print_flag;
 };
 
 static inline int kvm_vcpu_exiting_guest_mode(struct kvm_vcpu *vcpu)

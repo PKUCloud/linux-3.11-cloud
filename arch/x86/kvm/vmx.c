@@ -3476,7 +3476,6 @@ static u32 vmx_segment_access_rights(struct kvm_segment *var)
 		ar |= (var->db & 1) << 14;
 		ar |= (var->g & 1) << 15;
 	}
-
 	return ar;
 }
 
@@ -4792,13 +4791,14 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		vmx_fpu_activate(vcpu);
 		return 1;
 	}
-
+	
 	if (is_invalid_opcode(intr_info)) {
 		er = emulate_instruction(vcpu, EMULTYPE_TRAP_UD);
 		if (er != EMULATE_DONE)
 			kvm_queue_exception(vcpu, UD_VECTOR);
 		return 1;
 	}
+
 
 	error_code = 0;
 	if (intr_info & INTR_INFO_DELIVER_CODE_MASK)
@@ -4816,14 +4816,18 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 		vcpu->run->internal.ndata = 2;
 		vcpu->run->internal.data[0] = vect_info;
 		vcpu->run->internal.data[1] = intr_info;
+
 		return 0;
 	}
 
 	if (is_page_fault(intr_info)) {
+		print_record(0, "!!!BUG handle_exception--page fault (if with EPT enable)!!!\n");
 		/* EPT won't cause page fault directly */
 		BUG_ON(enable_ept);
 		cr2 = vmcs_readl(EXIT_QUALIFICATION);
 		trace_kvm_page_fault(cr2, error_code);
+
+
 
 		if (kvm_event_needs_reinjection(vcpu))
 			kvm_mmu_unprotect_page_virt(vcpu, cr2);
@@ -5603,7 +5607,9 @@ int __tm_commit(void *opaque)
 	}
 
 	// Reset variants
-	print_record("XELATEX turn %llu============================\n", kvm->tm_turn);
+#ifdef CONFIG_RSR_BASIC_DEBUG
+	print_record(vcpu->vcpu_id, "XELATEX turn %llu============================\n", kvm->tm_turn);
+#endif
 	kvm->record_master = false;
 
 	return 0;
@@ -5657,7 +5663,7 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 
 		// Master, sync when enter, wait slaves enter
 		if (online_vcpus > 1 && down_interruptible(&(kvm->tm_enter_sem))) {
-			print_record("XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
+			print_record(vcpu->vcpu_id, "XELATEX - vcpu=%d, master,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
 			return -1;
 		}
@@ -5685,7 +5691,7 @@ int tm_sync(struct kvm_vcpu *vcpu, int kick_time,
 
 		// Slave, sync when exit, wait master's end
 		if (down_interruptible(&(kvm->tm_exit_sem))) {
-			print_record("XELATEX - vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
+			print_record(vcpu->vcpu_id, "XELATEX - vcpu=%d, slave,interrupt received waiting kvm->tm_enter_sem\n", 
 				vcpu->vcpu_id);
 			ret = -1;
 		}
@@ -5778,14 +5784,18 @@ int tm_unsync_init(void *opaque)
 	vcpu->is_recording = true;
 
 	if (kvm_record_separate_mem) {
-		print_record("Start HARD_MMU record vcpu %d ---------------------\n",
+#ifdef CONFIG_RSR_BASIC_DEBUG
+		print_record(vcpu->vcpu_id, "Start HARD_MMU record vcpu %d ---------------------\n",
 				vcpu->vcpu_id);
+#endif
 	}
 
 	return 0;
 }
 
 extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
+extern void kvm_record_check_spte(struct kvm_private_mem_page *private_page, int is_commit);
+
 /* Tamlok
  * Commit the private pages to the original ones. Called when a quantum is
  * finished and can commit.
@@ -5803,10 +5813,11 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		private = pfn_to_kaddr(private_page->private_pfn);
 		copy_page(origin, private);
 
-		//print_record("commit: vcpu %d orgin_pfn 0x%llx private_pfn 0x%llx pages %d\n",
+		//print_record(0, "commit: vcpu %d orgin_pfn 0x%llx private_pfn 0x%llx pages %d\n",
 		//	vcpu->vcpu_id, private_page->original_pfn,
 		//	private_page->private_pfn, i++);
 
+		kvm_record_check_spte(private_page, 1);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 
 		kfree(private);
@@ -5832,6 +5843,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
+		kvm_record_check_spte(private_page, 0);
 		kvm_record_spte_set_pfn(private_page->sptep, private_page->original_pfn);
 
 		kfree(pfn_to_kaddr(private_page->private_pfn));
@@ -5861,17 +5873,18 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 		mutex_lock(&(kvm->tm_lock));
 		//if (!(kvm->timestamp % 1000))
-			print_record("XELATEX - vcpu=%d, timestamp=%llu =====================================================\n",
+#ifdef CONFIG_RSR_OTHER_DEBUG
+			print_record(vcpu->vcpu_id, "XELATEX - vcpu=%d, timestamp=%llu =====================================================\n",
 					vcpu->vcpu_id, kvm->timestamp);
-
+#endif
 		/*
 		if (kvm_record_separate_mem) {
-			print_record("tm_unsync_commit: vcpu %d timestamp %llu =======================\n",
+			print_record(vcpu->vcpu_id, "tm_unsync_commit: vcpu %d timestamp %llu =======================\n",
 				vcpu->vcpu_id, kvm->timestamp);
 
 			tm_memory_commit(vcpu);
 
-			print_record("-----------------------------------------------\n");
+			print_record(0, "-----------------------------------------------\n");
 		}
 		*/
 
@@ -5879,7 +5892,7 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
 			// Detect conflict
 			if (tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
-				//print_record("XELATEX - conflict, vcpu=%d\n", vcpu->vcpu_id);
+				//print_record(vcpu->vcpu_id, "XELATEX - conflict, vcpu=%d\n", vcpu->vcpu_id);
 				commit = 0;
 				vcpu->nr_conflict++;
 			}
@@ -7081,7 +7094,7 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	u32 exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
 	unsigned long rip = vmcs_readl(GUEST_RIP);
-	u32 sec_vm_exec_ctrl = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
+	//u32 sec_vm_exec_ctrl = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
 
 	// XELATEX
 	if (kvm_record)
@@ -7094,11 +7107,14 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 
 	// XELATEX
 	if (kvm_record){
-		print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
-				__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
-		
+#ifdef CONFIG_RSR_BASIC_DEBUG
+		//if (exit_reason != 48){
+			print_record(vcpu->vcpu_id, "XELATEX - %s, exit_reason=%d, rip=0x%lx\n",
+					__func__, exit_reason, rip);
+		//}
+#endif		
 		/*if (exit_reason == 2){
-			print_record("XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
+			print_record(0, "XELATEX - %s, %d, exit_reason=%d, rip=0x%lx, sec_vm_exec_ctrl=0x%x\n",
 					__func__, __LINE__, exit_reason, rip, sec_vm_exec_ctrl);
 		}*/
 	}
@@ -7206,7 +7222,9 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 
 	// First time
 	if (!vcpu->is_recording) {
-		print_record("XELATEX - First time to check rr commit\n");
+#ifdef CONFIG_RSR_OTHER_DEBUG
+		print_record(vcpu->vcpu_id, "XELATEX - First time to check rr commit\n");
+#endif
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "XELATEX - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
@@ -7215,7 +7233,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	}
 #if 0
 	if (exit_reason == EXIT_REASON_PREEMPTION_TIMER) {
-		print_record("XELATEX - check reason : Preemption\n");
+		print_record(vcpu->vcpu_id, "XELATEX - check reason : Preemption\n");
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "XELATEX - %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
@@ -7227,7 +7245,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 #endif
 #if 0
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu)) {
-		print_record("XELATEX - check reason : event\n");
+		print_record(vcpu->vcpu_id, "XELATEX - check reason : event\n");
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
@@ -7238,20 +7256,22 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			return KVM_RR_ROLLBACK;
 	}else {
 #endif
+#ifdef CONFIG_RSR_BASIC_DEBUG
 		if (exit_reason == EXIT_REASON_IO_INSTRUCTION)
-			print_record("XELATEX - check reason : IO\n");
+			print_record(vcpu->vcpu_id, "XELATEX - check reason : IO\n");
 		else if (exit_reason == EXIT_REASON_EPT_MISCONFIG)
-			print_record("XELATEX - check reason : MMIO\n");
+			print_record(vcpu->vcpu_id, "XELATEX - check reason : MMIO\n");
 		else if (exit_reason == EXIT_REASON_PREEMPTION_TIMER)
-			print_record("XELATEX - check reason : Preemption\n");
+			print_record(vcpu->vcpu_id, "XELATEX - check reason : Preemption\n");
+#endif		
 		//else if (exit_reason == EXIT_REASON_PENDING_INTERRUPT)
-		//	print_record("XELATEX - check reason : Interrupt Window\n");
+		//	print_record(vcpu->vcpu_id, "XELATEX - check reason : Interrupt Window\n");
 		//else if (exit_reason == EXIT_REASON_NMI_WINDOW)
-		//	print_record("XELATEX - check reason : NMI Window\n");
+		//	print_record(vcpu->vcpu_id, "XELATEX - check reason : NMI Window\n");
 		//else if (exit_reason == EXIT_REASON_EXTERNAL_INTERRUPT)
-		//	print_record("XELATEX - check reason : External Interrupt\n");
+		//	print_record(vcpu->vcpu_id, "XELATEX - check reason : External Interrupt\n");
 		//else if (exit_reason == EXIT_REASON_EXCEPTION_NMI)
-		//	print_record("XELATEX - check reason : Exception or NMI\n");
+		//	print_record(vcpu->vcpu_id, "XELATEX - check reason : Exception or NMI\n");
 
 		switch (exit_reason) {
 		/* IO */
@@ -7523,6 +7543,8 @@ static void __vmx_complete_interrupts(struct kvm_vcpu *vcpu,
 		vcpu->arch.event_exit_inst_len = vmcs_read32(instr_len_field);
 		/* fall through */
 	case INTR_TYPE_HARD_EXCEPTION:
+		if (kvm_record)	print_record(0, "%s--%d\n", __func__, __LINE__);
+		
 		if (idt_vectoring_info & VECTORING_INFO_DELIVER_CODE_MASK) {
 			u32 err = vmcs_read32(error_code_field);
 			kvm_queue_exception_e(vcpu, vector, err);
@@ -7549,6 +7571,7 @@ static void vmx_complete_interrupts(struct vcpu_vmx *vmx)
 
 static void vmx_cancel_injection(struct kvm_vcpu *vcpu)
 {
+	if (kvm_record)	print_record(0, "%s--%d\n", __func__, __LINE__);
 	__vmx_complete_interrupts(vcpu,
 				  vmcs_read32(VM_ENTRY_INTR_INFO_FIELD),
 				  VM_ENTRY_INSTRUCTION_LEN,

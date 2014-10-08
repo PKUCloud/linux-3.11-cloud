@@ -4,6 +4,13 @@
 #include <linux/kvm_host.h>
 #include "kvm_cache_regs.h"
 
+//rsr-debug
+#define CONFIG_RSR_BASIC_DEBUG
+//#define CONFIG_RSR_OTHER_DEBUG
+#define CONFIG_RSR_MMU_DEBUG
+//#define CONFIG_RSR_APIC_DEBUG
+//end rsr-debug
+
 static inline void kvm_clear_exception_queue(struct kvm_vcpu *vcpu)
 {
 	vcpu->arch.exception.pending = false;

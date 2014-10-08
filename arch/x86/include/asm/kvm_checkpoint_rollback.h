@@ -3,6 +3,8 @@
 #ifndef ARCH_X86_KVM_CHECKPOINT_H
 #define ARCH_X86_KVM_CHECKPOINT_H
 
+#include <uapi/asm/kvm.h>
+
 typedef struct MSRdata{
 	struct kvm_msrs info;
 	struct kvm_msr_entry entries[100];	

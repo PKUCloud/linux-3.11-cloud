@@ -1,3 +1,4 @@
+/* #define DEBUG */
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -34,16 +35,8 @@ struct kmem_cache *data_cache;    //data page cache
 struct kmem_cache *quantum_cache;   //for struct logger_quantum
 
 struct proc_dir_entry *entry;
-//char buf[4096];
-//size_t size = 4096;
 
-
-EXPORT_SYMBOL_GPL(data_cache);
-EXPORT_SYMBOL_GPL(quantum_cache);
-EXPORT_SYMBOL_GPL(logger_quantum);
-
-
-
+extern bool kvm_record;	/*if recording is running */
 // open function
 int logger_open(struct inode *inode, struct file *filp)
 {
@@ -63,90 +56,86 @@ int logger_release(struct inode *inode, struct file *filp)
 }
 
 
-//read function
+/* read function of the file_operations
+ * does not return data really
+ * just return struct quantum_info to the user-space to tell the info 
+ * about next quantum to read. Then the user-space will mmap() to read
+ * the quantum. This function will be blocked if the global out_list is
+ * empty.
+ */
 ssize_t logger_read(struct file *filp, char __user *buf, size_t count,
 	loff_t *f_pos)
 {
 	struct logger_dev *dev = filp->private_data;
-	int ret = count;
-	char tmp[logger_quantum];
+	/*despite what count is, ret is the size of quantum_info.
+	 * In the case of fread(), it will always set count to 4096 (buffer).
+	 */
+	int ret = sizeof(struct quantum_info);
+	struct quantum_info qinfo;
+	struct logger_quantum *ptr;
+	struct vcpu_quantum *vq;
 
 	spin_lock(&dev->dev_lock);
-	if(likely(dev->size >= logger_quantum)) {
-		//there are more than one page data
-		//tell the program to use mmap to transfer data
-		*f_pos += count;
-		goto out;
-	}else {
-
-		if(likely(dev->state == NORMAL)) {
-			if(unlikely(filp->f_flags & O_NONBLOCK)) {
-				ret = -EAGAIN;
-				goto out;
-			}
-			while(dev->size < logger_quantum) {
-				if(unlikely(dev->state == FLUSHED)) {
-					//return remaining data to user directly
-					goto flushed;
+	while(1) {
+		if(likely(dev->head)) {
+			/* the global out_list is not empty
+			 * so there are quantums to be transfered
+			 */
+			 ptr = dev->head;
+			 qinfo.vcpu_id = ptr->vcpu_id;
+			 qinfo.quantum_size = ptr->quantum_size;
+			 goto out;
+		} else {
+			/* the global out_list is empty now
+			 * either to wait for data or wait for a flush command
+			 */
+			if(unlikely(dev->state == FLUSHED)) {
+			 	/* now there is no data in the out_list and the state
+			 	 * is FLUSHED. It means the record is terminated.
+			 	 */
+			 	 ret = 0;
+			 	 dev->state = NORMAL;
+			 	 goto out;
+			} else {
+			 	if(unlikely(filp->f_flags & O_NONBLOCK)) {
+				 	ret = -EAGAIN;
+				 	goto out;
 				}
+				 /* block */
 				spin_unlock(&dev->dev_lock);
-
-				//maybe there is some question here with ioctl(flush)
-				//maybe need to flush twice
-				if(wait_event_interruptible(dev->queue, (dev->size >= logger_quantum || dev->state == FLUSHED)))
+				 /* sometimes maybe even after a flush, there is no data in out_list. In this situation
+				  * we need to wake up it, too.
+				  */
+				if(wait_event_interruptible(dev->queue, (dev->head != NULL || dev->state == FLUSHED)))
 					return -ERESTARTSYS;
-
 				spin_lock(&dev->dev_lock);
 			}
-			
-			//has more than one page data
-			goto out;
-
-		}else if(unlikely(dev->state == FLUSHED)) {
-			//return remaining data to user directly
-			goto flushed;
 		}
 	}
-	
-flushed:
-	//maybe some problems here
-	//spin_lock vs sleep
-	//flush all the data to user space
-	ret = dev->size;
-	if(ret == 0) {
-		dev->state = NORMAL;
-		goto out;    //EOF
-	}
-	memcpy(tmp, (char*)(dev->head->data), ret);
-	spin_unlock(&dev->dev_lock);
-
-	//though not holding the lock
-	//but the state is flushed, and no one else can add new data
-	//proc can read the data yet, but doesn't matter
-	if(copy_to_user(buf, tmp, ret)) {
-		return -EFAULT;
-	}
-	
-	spin_lock(&dev->dev_lock);
-	//data has been flushed out
-	//delete the last page
-	assert((dev->head == dev->tail));
-
-
-	if(likely(dev->size < logger_quantum)) {
-		kmem_cache_free(data_cache, dev->head->data);
-		kmem_cache_free(quantum_cache, dev->head);
-
-		dev->head = dev->tail = NULL;
-		dev->str = dev->end = NULL;
-		dev->size = 0;
-	}
-
-	*f_pos += ret;
 
 	
 out:
 	spin_unlock(&dev->dev_lock);
+	
+	if(likely(ret > 0)) {
+		/* transfer qinfo to user-space */
+		if(copy_to_user(buf, &qinfo, sizeof(qinfo))) {
+			return -EFAULT;
+		}
+		*f_pos += ret;	/* does the delta have to be the same as ret? */
+	}else if(ret == 0) {
+		/* eof
+		 * all the data has been flushed out
+		 * we need to reactive all the vcpu_quantums to receive next new data
+		 */
+		int i;
+		for(i = 0; i < MAX_VCPU; ++i) {
+			vq = &dev->quantums[i];
+			spin_lock(&vq->vcpu_lock);
+			vq->active = 1;
+			spin_unlock(&vq->vcpu_lock);
+		}
+	}
 	return ret;
 }
 
@@ -170,23 +159,64 @@ long logger_ioctl(struct file *filp,
 	unsigned int cmd, unsigned long arg)
 {
 	int ret = 0;
+	int i, size;
 	struct logger_dev *dev = filp->private_data;
+	struct vcpu_quantum *vq;
+	struct logger_quantum *ptr;
 
 	if(_IOC_TYPE(cmd) != LOGGER_IOC_MAGIC) return -ENOTTY;
 
 	switch(cmd) {
-		case LOGGER_FLUSH:
-		//stop kernel to log into device
-		//flushed all the data out to userspace
-		//always it means the vm has stopped and flush all the log to userspace
-			spin_lock(&dev->dev_lock);
-			dev->state = FLUSHED;
-			wake_up_interruptible(&dev->queue);         //maybe there is some question here with read
-			spin_unlock(&dev->dev_lock);
-			break;
+	/* If recording is still running, just return immediately,
+	 * otherwise, moves all the vcpu_quantums's quantum to the out_list
+	 * and flush them out to user-space
+	 */
+	case LOGGER_FLUSH:
+		if(kvm_record)
+			return -EPERM;	/* operation not permitted */
+		/* must first inactive all the vcpu_quantums to ensure that none are
+		 * modifying the state of the vcpu_quantums
+		 */
+		for(i = 0; i < MAX_VCPU; ++i) {
+			vq = &dev->quantums[i];
+			spin_lock(&vq->vcpu_lock);
+			vq->active = 0;
+			spin_unlock(&vq->vcpu_lock);
+		}
+		spin_lock(&dev->dev_lock);
+		dev->state = FLUSHED;
+		for(i = 0; i < MAX_VCPU; ++i) {
+			vq = &dev->quantums[i];
+			if(vq->head) {
+				assert(vq->head == vq->tail && vq->vcpu_id == vq->head->vcpu_id);
+				size = vq->str - (char*)(vq->head->data);
+				if(size > 0) {
+					/* move it to the out_list
+					 * because we have set all the vcpu_quantums inactive before,
+					 * we can now modify the vcpu_quantums freely and safely
+					 */
+					ptr = vq->head;
+					assert(ptr->next == NULL);
+					vq->head = vq->tail = NULL;
+					vq->str = vq->end = NULL;
+					ptr->quantum_size = size;
+					if(logger_dev.head == NULL) {
+						logger_dev.head = ptr;
+						logger_dev.tail = ptr;
+					} else {
+						logger_dev.tail->next = ptr;
+						logger_dev.tail = ptr;
+					}
+					wake_up_interruptible(&dev->queue);
+				}
+			}
+		}
+		wake_up_interruptible(&dev->queue);
+		spin_unlock(&dev->dev_lock);
+		break;
 
-		default:
-			return -ENOTTY;
+	default:
+		return -ENOTTY;
 	}
 	return ret;
 }
@@ -213,13 +243,24 @@ static int logger_setup_cdev(struct logger_dev *dev)
 	dev->cdev.ops = &logger_fops;
 	err = cdev_add(&dev->cdev, devno, 1);
 
-	if(err)
-		printk(KERN_NOTICE "Error %d adding logger", err);
+	if(err) {
+		pr_err("Err: %d fail to cdev_add() for logger\n", err);
+		goto out;
+	}
 
-	//err control?
 	dev->logger_class = class_create(THIS_MODULE, "logger");
+	if(IS_ERR(dev->logger_class)) {
+		pr_err("Err: fail to class_create() for logger\n");
+		err = -1;
+		goto fail_create_class;
+	}
 	device_create(dev->logger_class, NULL, devno, NULL, "logger");
 
+	return 0;
+
+fail_create_class:
+	cdev_del(&dev->cdev);
+out:
 	return err;
 }
 
@@ -229,16 +270,16 @@ static int logger_setup_cdev(struct logger_dev *dev)
 
 
 /**
-interfaces for seq_file
+* interfaces for seq_file
+* just show the data of the out_list
 */
 static void *logger_seq_start(struct seq_file *s, loff_t *pos)
 {
 	int i = *pos;
 	struct logger_quantum *ptr;
 
-	//printk(KERN_ALERT "seq_start\n");
-
 	spin_lock(&logger_dev.dev_lock);
+
 	ptr = logger_dev.head;
 	while(ptr != NULL && i > 0){
 		ptr = ptr->next;
@@ -247,7 +288,7 @@ static void *logger_seq_start(struct seq_file *s, loff_t *pos)
 
 	if(i > 0 || !ptr)
 		return NULL;
-	else return ptr->data;
+	else return ptr;
 }
 
 
@@ -256,8 +297,6 @@ static void *logger_seq_next(struct seq_file *s, void *v, loff_t *pos)
 	int i = ++(*pos);
 	struct logger_quantum *ptr = logger_dev.head;
 
-	//printk(KERN_ALERT "seq_next\n");
-
 	while(ptr != NULL && i > 0){
 		ptr = ptr->next;
 		i--;
@@ -265,21 +304,21 @@ static void *logger_seq_next(struct seq_file *s, void *v, loff_t *pos)
 
 	if(i > 0 || !ptr)
 		return NULL;
-	else return ptr->data;
+	else return ptr;
 }
 
 static void logger_seq_stop(struct seq_file *s, void *v)
 {
-	//printk(KERN_ALERT "seq_stop\n");
 	spin_unlock(&logger_dev.dev_lock);
 }
 
 static int logger_seq_show(struct seq_file *s, void *v)
 {
-	char *str = (char*)v;
+	struct logger_quantum *ptr = v;
 	int i = 0;
+	char *str = (char*)ptr->data;
 
-	//printk(KERN_ALERT "seq_show\n");
+	if(ptr->vcpu_id != 0) return 0;
 
 	seq_puts(s, "<start>=================\n");
 	for(i = 0; i < 4096; i++)
@@ -316,6 +355,23 @@ end of interfaces for seq_file
 
 
 
+/*init struct logger_dev */
+static void logger_dev_init(struct logger_dev *dev)
+{
+	int i;
+	if(dev) {
+		memset(dev, 0, sizeof(*dev));
+		spin_lock_init(&dev->dev_lock);
+		init_waitqueue_head(&dev->queue);
+		dev->state = NORMAL;
+
+		for(i = 0; i < MAX_VCPU; ++i) {
+			dev->quantums[i].vcpu_id = i;
+			spin_lock_init(&dev->quantums[i].vcpu_lock);	/* here init all vcpu_quantums's vcpu_lock */
+			dev->quantums[i].active = 1;
+		}
+	}
+}
 
 
 
@@ -332,14 +388,13 @@ int logger_init(void)
 		logger_major = MAJOR(dev);
 	}
 
-	if(result < 0)
-		return result;
+	if(result < 0) {
+		pr_err("Err: %d fail to register_chrdev_region() for logger\n", result);
+		goto out;
+	}
 
 
-	memset(&logger_dev, 0, sizeof(struct logger_dev));
-
-	spin_lock_init(&logger_dev.dev_lock);
-	init_waitqueue_head(&logger_dev.queue);
+	logger_dev_init(&logger_dev);
 
 
 	//create cache   //3.11 is different from 2.6
@@ -347,6 +402,7 @@ int logger_init(void)
 		0, 0, NULL);        //no ctor/dtor  SLAB_HWCACHE_ALIGN??
 	if(!data_cache) {
 		result = -ENOMEM;
+		pr_err("Err: %d fail to kmem_cache_create() for logger\n", result);
 		goto fail_create_cache;
 	}
 
@@ -354,6 +410,7 @@ int logger_init(void)
 		0, 0, NULL);
 	if(!quantum_cache) {
 		result = -ENOMEM;
+		pr_err("Err: %d fail to kmem_cache_create() for logger\n", result);
 		goto fail_create_cache;
 	}
 
@@ -365,44 +422,75 @@ int logger_init(void)
 
 	//init the seq interface
 	entry = proc_create("logger", 0, NULL, &logger_file_ops);
-	if(!entry)
-		printk(KERN_ALERT "proc_create():Fail to create proc entry\n");
+	if(!entry) {
+		result = -1;
+		pr_err("Err: fail to proc_create() for logger\n");
+		goto fail_add_proc;
+	}
 
 	logger_dev.print_time = logger_print_time;
 
-	printk(KERN_ALERT "Logger init successfully\n");
-	return 0;   //success
+	pr_debug("logger init successfully\n");
+	result = 0;
+	goto out;	/* success */
 
-	fail_add_dev:
-		kmem_cache_destroy(quantum_cache);
+fail_add_proc:
+	cdev_del(&logger_dev.cdev);
+	device_destroy(logger_dev.logger_class, MKDEV(logger_major, 0));
+	class_destroy(logger_dev.logger_class);
 
-	fail_create_cache:
-		if(data_cache)
-			kmem_cache_destroy(data_cache);
-		unregister_chrdev_region(dev, 1);
-		printk(KERN_ALERT "logger_init(): fail to create cache\n");
-		return result;
+fail_add_dev:
+	kmem_cache_destroy(quantum_cache);
+
+fail_create_cache:
+	if(data_cache)
+		kmem_cache_destroy(data_cache);
+	unregister_chrdev_region(dev, 1);
+
+out:
+	return result;
 }
 
 
 
-//free the memory
-void logger_trim(void)
+/*free the memory */
+void logger_trim(struct logger_dev *dev)
 {
 	struct logger_quantum *cur, *next;
+	int i;
 	
-	cur = logger_dev.head;
-	if(cur) {
+	/* release the out_list */
+	cur = dev->head;
+	while(cur) {
 		next = cur->next;
 		kmem_cache_free(data_cache, cur->data);
 		kmem_cache_free(quantum_cache, cur);
 		cur = next;
 	}
-	logger_dev.head = NULL;
-	logger_dev.tail = NULL;
+	dev->head = NULL;
+	dev->tail = NULL;
+	/*
 	logger_dev.str = logger_dev.end = NULL;
 	logger_dev.size = 0;
+	*/
 	
+	/* release the vcpu_quantums */
+	for(i = 0; i < MAX_VCPU; ++i) {
+		struct vcpu_quantum *vq;
+
+		vq = dev->quantums + i;
+		cur = vq->head;
+		while(cur) {
+			next = cur->next;
+			kmem_cache_free(data_cache, cur->data);
+			kmem_cache_free(quantum_cache, cur);
+			cur = next;
+		}
+		vq->str = NULL;
+		vq->end = NULL;
+		vq->head = NULL;
+		vq->tail = NULL;
+	}
 }
 
 void logger_cleanup(void)
@@ -414,7 +502,7 @@ void logger_cleanup(void)
 	
 	spin_lock(&logger_dev.dev_lock);
 
-	logger_trim();
+	logger_trim(&logger_dev);
 
 	if(data_cache)
 		kmem_cache_destroy(data_cache);
@@ -431,16 +519,18 @@ void logger_cleanup(void)
 
 	unregister_chrdev_region(MKDEV(logger_major, 0), 1);
 
-	printk(KERN_ALERT "Logger exit successfully\n");
+	pr_debug("logger exit successfully\n");
 }
 
 
 
 
-
-//Called when there is no rom to store log, alloc a new struct logger_quantum and a page
-//Before calling this function, you should get the lock
-static inline int logger_alloc_page(void)
+/* this function should not be used now. It is obsolete
+ *Called when there is no rom to store log, alloc a new struct logger_quantum and a page
+ *Before calling this function, you should get the lock
+ */
+ /*
+int logger_alloc_page(void)
 {
 	struct logger_quantum *ptr;
 	int result = 0;
@@ -448,19 +538,19 @@ static inline int logger_alloc_page(void)
 	ptr = kmem_cache_alloc(quantum_cache, GFP_ATOMIC);
 	if(!ptr) {
 		result = -ENOMEM;
-		goto err;
+		pr_err("Err: %d fail to kmem_cache_alloc() for logger\n", result);
+		goto out;
 	}
 
-	ptr->data = ptr->next = NULL;
+	memset(ptr, 0, sizeof(*ptr));
+
 	ptr->data = kmem_cache_alloc(data_cache, GFP_ATOMIC);
 	if(!ptr->data) {
 		kmem_cache_free(quantum_cache, ptr);
 		result = -ENOMEM;
-		goto err;
+		pr_err("Err: %d fail to kmem_cache_alloc() for logger\n", result);
+		goto out;
 	}
-
-	//printk(KERN_ALERT "ptr->data add: %lx\n", (unsigned long)ptr->data);
-	//if((unsigned long)ptr->data & (unsigned long)0xfff) printk(KERN_ALERT "ptr->data not page aligned\n");
 
 	memset(ptr->data, 0, logger_quantum);
 	if(logger_dev.head == NULL) {
@@ -473,11 +563,78 @@ static inline int logger_alloc_page(void)
 	logger_dev.str = (char*)ptr->data;
 	logger_dev.end = logger_dev.str + logger_quantum;
 
-	return 0;
-
-err:
-	printk(KERN_ALERT "logger_alloc_page(): kmem_cache_alloc() fail\n");
+out:
 	return result;
+}
+*/
+
+
+/* this function is called when there is no room for a vcpu_quantum to store a log
+ * it first allocates a new quantum to the vcpu_quantum
+ * then it moves the former full page (if exists) to the global out_list
+ */
+int logger_alloc_move_page(struct vcpu_quantum *vq)
+{
+	struct logger_quantum *ptr;
+	int ret = 0;
+
+	ptr = kmem_cache_alloc(quantum_cache, GFP_ATOMIC);
+	if(!ptr) {
+		ret = -ENOMEM;
+		pr_err("Err: %d fail to kmem_cache_alloc() for logger\n", ret);
+		goto move;
+	}
+
+	memset(ptr, 0, sizeof(*ptr));	/* ptr->quantum_size is set to 0 */
+
+	ptr->data = kmem_cache_alloc(data_cache, GFP_ATOMIC);
+	if(!ptr->data) {
+		kmem_cache_free(quantum_cache, ptr);
+		ret = -ENOMEM;
+		pr_err("Err: %d fail to kmem_cache_alloc() for logger\n", ret);
+		goto move;
+	}
+
+	memset(ptr->data, 0, logger_quantum);
+	ptr->vcpu_id = vq->vcpu_id;
+	vq->str = (char*)ptr->data;
+	vq->end = vq->str + logger_quantum;
+	if(vq->head == NULL) {
+		vq->head = ptr;
+		vq->tail = ptr;
+	} else {
+		vq->tail->next = ptr;
+		vq->tail = ptr;
+		goto move;
+	}
+
+	return ret;
+
+move:
+	if(vq->head == NULL) 
+		return ret;
+	/* move the head quantum to the global out_list */
+	ptr = vq->head;
+	vq->head = vq->head->next;
+	if(vq->tail == ptr) {	/* there is only one page */
+		vq->tail = vq->head;
+		assert(vq->tail == NULL && vq->str != ptr->data);
+	}
+	assert(vq->str != ptr->data);
+	ptr->next = NULL;
+	ptr->quantum_size = logger_quantum;	/* it is a full quantum */
+	spin_lock(&logger_dev.dev_lock);
+	if(logger_dev.head == NULL) {
+		logger_dev.head = ptr;
+		logger_dev.tail = ptr;
+	} else {
+		logger_dev.tail->next = ptr;
+		logger_dev.tail = ptr;
+	}
+	wake_up_interruptible(&logger_dev.queue);
+	spin_unlock(&logger_dev.dev_lock);
+
+	return ret;
 }
 
 
@@ -691,7 +848,7 @@ char *put_dec(char *buf, unsigned long long n)
 
 //return the length of the total output
 static noinline_for_stack
-int number(char **buf, char **end, unsigned long long num,
+int number(struct vcpu_quantum *vq, unsigned long long num,
 	struct printf_spec spec)
 {
 	static const char digits[16] = "0123456789ABCDEF";
@@ -753,37 +910,41 @@ int number(char **buf, char **end, unsigned long long num,
 	spec.field_width -= spec.precision;
 	if(!(spec.flags & (ZEROPAD + LEFT))) {
 		while(--spec.field_width >= 0) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = ' ';
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = ' ';
+			++(vq->str);
 			++length;
 		}
 	}
 
 	//signed
 	if(sign) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = sign;
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = sign;
+		++(vq->str);
 		++length;
 	}
 
 	//"0x" or "0" prefix
 	if(need_pfx) {
 		if(spec.base == 16 || !is_zero) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = '0';
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = '0';
+			++(vq->str);
 			++length;
 		}
 		if(spec.base == 16) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = ('X' | locase);
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = ('X' | locase);
+			++(vq->str);
 			++length;
 		}
 	}
@@ -792,40 +953,43 @@ int number(char **buf, char **end, unsigned long long num,
 	if(!(spec.flags & LEFT)) {
 		char c = (spec.flags & ZEROPAD) ? '0' : ' ';
 		while(--spec.field_width >= 0) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = c;
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = c;
+			++(vq->str);
 			++length;
 		}
 	}
 
 	//even more zero padding
 	while(i <= --spec.precision) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = '0';
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = '0';
+		++(vq->str);
 		++length;
 	}
 
 	//actual digits of result
 	while(--i >= 0) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		//(*buf)[0] = tmp[i];
-		**buf = tmp[i];
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = tmp[i];
+		++(vq->str);
 		++length;
 	}
 	
 
 	//trailing space padding
 	while(--spec.field_width >= 0) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = ' ';
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = ' ';
+		++(vq->str);
 		++length;
 	}
 
@@ -835,37 +999,44 @@ int number(char **buf, char **end, unsigned long long num,
 
 //return the length of the total output
 static noinline_for_stack
-int string(char **buf, char **end, const char *s, struct printf_spec spec)
+int string(struct vcpu_quantum *vq, const char *s, struct printf_spec spec)
 {
 	int len, i, length = 0;
-
-	if((unsigned long)s < PAGE_SIZE)
+ 	/* what does it mean? */
+	if((unsigned long)s < PAGE_SIZE) {
 		s = "(null)";
+		printk(KERN_ALERT "(unsigned long)s < PAGE_SIZE is true!!! Check line #828 in logger.c\n");
+	}
+		
 
 	len = strnlen(s, spec.precision);
 
 	if(!(spec.flags & LEFT)) {
 		while(len < spec.field_width--) {
-			if(unlikely(*buf >= *end))
-				logger_alloc_page();
-			**buf = ' ';
-			++(*buf);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = ' ';
+			++(vq->str);
 			++length;
 		}
 	}
 	for (i = 0; i < len; ++i) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = *s;
-		++(*buf);++s;
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = *s;
+		++(vq->str);
+		++s;
 	}
 	length += len;
 
 	while(len < spec.field_width--) {
-		if(unlikely(*buf >= *end))
-			logger_alloc_page();
-		**buf = ' ';
-		++(*buf);
+		if(unlikely(vq->str >= vq->end)) 
+			if(unlikely(logger_alloc_move_page(vq)))
+				return length;
+		*(vq->str) = ' ';
+		++(vq->str);
 		++length;
 	}
 
@@ -1065,17 +1236,17 @@ qualifier:
 }
 
 
-//should get the lock before calling this function
-static int __print_record(const char* fmt, va_list args)
+/* print the message into the destinated struct vcpu_quantum's list */
+static int __print_record(struct vcpu_quantum *vq, const char* fmt, va_list args)
 {
 	unsigned long long num;
-	char **str, **end;
 	struct printf_spec spec = {0};
 	int i, length = 0;
 
-
+	/*
 	str = &logger_dev.str;
 	end = &logger_dev.end;
+	*/
 
 	//print the timestamp at the front of every message
 	if(logger_dev.print_time) {
@@ -1089,10 +1260,11 @@ static int __print_record(const char* fmt, va_list args)
 		tlen = sprintf(tbuf, "[%5lu.%06lu] ", (unsigned long)t, nanosec_rem / 1000);
 
 		for(i = 0; i < tlen; ++i) {
-			if(unlikely(*str >= *end)) 
-				logger_alloc_page();
-			**str = tbuf[i];
-			++(*str);
+			if(unlikely(vq->str >= vq->end)) 
+				if(unlikely(logger_alloc_move_page(vq)))
+					return length;
+			*(vq->str) = tbuf[i];
+			++(vq->str);
 			++length;
 		}
 	}
@@ -1106,22 +1278,23 @@ static int __print_record(const char* fmt, va_list args)
 		switch(spec.type) {
 			case FORMAT_TYPE_NONE: {
 				int copy = read;
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
 
 				i = 0;
-				while(copy - i > *end - *str) {
-					memcpy(*str, old_fmt + i, *end - *str);
-					i += (*end - *str);
-					logger_alloc_page();
+				while(copy - i > vq->end - vq->str) {
+					memcpy(vq->str, old_fmt + i, vq->end - vq->str);
+					i += (vq->end - vq->str);
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
 				}
 
-				memcpy(*str, old_fmt + i, copy - i);
+				memcpy(vq->str, old_fmt + i, copy - i);
 
-				*str += (copy - i);
+				vq->str += (copy - i);
 				length += read;
 				break;
-
 			}
 
 			case FORMAT_TYPE_WIDTH: 
@@ -1139,39 +1312,42 @@ static int __print_record(const char* fmt, va_list args)
 				if(!(spec.flags & LEFT)) {
 					//space padding
 					while(--spec.field_width > 0) {
-						if(unlikely(*str >= *end))
-							logger_alloc_page();
-						**str = ' ';
-						++(*str);
+						if(unlikely(vq->str >= vq->end)) 
+							if(unlikely(logger_alloc_move_page(vq)))
+								return length;
+						*(vq->str) = ' ';
+						++(vq->str);
 						++length;
 					}
 				}
 
 				c = (unsigned char) va_arg(args, int);
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
-				**str = c;
-				++(*str);
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
+				*(vq->str) = c;
+				++(vq->str);
 				++length;
 
 				//left align
 				while(--spec.field_width > 0) {
-					if(unlikely(*str >= *end))
-						logger_alloc_page();
-					**str = ' ';
-					++(*str);
+					if(unlikely(vq->str >= vq->end)) 
+						if(unlikely(logger_alloc_move_page(vq)))
+							return length;
+					*(vq->str) = ' ';
+					++(vq->str);
 					++length;
 				}
 				break;
 			}
 
 			case FORMAT_TYPE_STR:
-				i = string(str, end, va_arg(args, char* ),spec);
+				i = string(vq, va_arg(args, char* ),spec);
 				length += i;
 				break;
 
-			//not implemented yet
-			/**
+
+			/** not implemented yet
 			case FORMAT_TYPE_PTR:
 				str = pointer(fmt+1, str, end, va_arg(args, void *),
 					spec);
@@ -1181,19 +1357,20 @@ static int __print_record(const char* fmt, va_list args)
 			**/
 
 			case FORMAT_TYPE_PERCENT_CHAR:
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
-				**str = '%';
-				++(*str);
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
+				*(vq->str) = '%';
+				++(vq->str);
 				++length;
-				
 				break;
 
 			case FORMAT_TYPE_INVALID:
-				if(unlikely(*str >= *end))
-					logger_alloc_page();
-				**str = '%';
-				++(*str);
+				if(unlikely(vq->str >= vq->end)) 
+					if(unlikely(logger_alloc_move_page(vq)))
+						return length;
+				*(vq->str) = '%';
+				++(vq->str);
 				++length;
 				break;
 
@@ -1262,51 +1439,37 @@ static int __print_record(const char* fmt, va_list args)
 					default:
 						num = va_arg(args, unsigned int);
 				}
-				i = number(str, end, num, spec);
+				i = number(vq, num, spec);
 				length += i;
 		}
 	}
 
 
-	if(*str < *end)
-		**str = '\0';
+	if(vq->str < vq->end)
+		*(vq->str) = '\0';
 
-	//printk(KERN_ALERT "%s", buf);
 	//the trailing null byte doesn't count towards the total
 	return length;
 }
 
 
-int print_record(const char* fmt, ...)
+int print_record(int vcpu_id, const char *fmt, ...)
 {
 	va_list args;  
-	int r; 
-
-	va_start(args, fmt);
+	int r = 0; 
+	struct vcpu_quantum *vq;
 	
-	spin_lock(&logger_dev.dev_lock);
-	if(logger_dev.state != NORMAL) {
-		r = -1;
-		goto out;
+	vq = &logger_dev.quantums[vcpu_id];
+	
+	spin_lock(&vq->vcpu_lock);
+	if(likely(vq->active)) {
+		va_start(args, fmt);
+		r = __print_record(vq, fmt, args);
+		va_end(args);
 	}
-	r = __print_record(fmt, args);
-
-	//just for test
-	//va_end(args);
-	//va_start(args, fmt);
-	//vprintk_emit(0, -1, NULL, 0, fmt, args);
-
-	logger_dev.size += r;
-	if(logger_dev.size >= logger_quantum) {
-		wake_up_interruptible(&logger_dev.queue);
-	}
-
-out:
-	spin_unlock(&logger_dev.dev_lock);
-	va_end(args);
+	spin_unlock(&vq->vcpu_lock);
 	return r;   
 }
-
 EXPORT_SYMBOL_GPL(print_record);
 
 module_init(logger_init);

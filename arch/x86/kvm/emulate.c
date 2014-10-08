@@ -4118,7 +4118,7 @@ int x86_decode_insn(struct x86_emulate_ctxt *ctxt, void *insn, int insn_len)
 	ctxt->fetch.end = ctxt->fetch.start + insn_len;
 	if (insn_len > 0)
 		memcpy(ctxt->fetch.data, insn, insn_len);
-	//if(kvm_record) print_record("XELATEX - %s, %d\n", __func__, __LINE__);
+	//if(kvm_record) print_record(0, "XELATEX - %s, %d\n", __func__, __LINE__);
 
 	switch (mode) {
 	case X86EMUL_MODE_REAL:
@@ -4188,7 +4188,7 @@ int x86_decode_insn(struct x86_emulate_ctxt *ctxt, void *insn, int insn_len)
 
 		ctxt->rex_prefix = 0;
 	}
-	if(kvm_record) print_record("%s, %d\n", __func__, __LINE__);
+	//if(kvm_record) print_record(0, "%s, %d\n", __func__, __LINE__);
 
 done_prefixes:
 

@@ -298,7 +298,6 @@ static void kvm_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 {
 	struct kvm *kvm = mmu_notifier_to_kvm(mn);
 	int need_tlb_flush, idx;
-
 	/*
 	 * When ->invalidate_page runs, the linux pte has been zapped
 	 * already but the page is still allocated until
@@ -337,7 +336,6 @@ static void kvm_mmu_notifier_change_pte(struct mmu_notifier *mn,
 {
 	struct kvm *kvm = mmu_notifier_to_kvm(mn);
 	int idx;
-
 	idx = srcu_read_lock(&kvm->srcu);
 	spin_lock(&kvm->mmu_lock);
 	kvm->mmu_notifier_seq++;
@@ -353,7 +351,6 @@ static void kvm_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
 {
 	struct kvm *kvm = mmu_notifier_to_kvm(mn);
 	int need_tlb_flush = 0, idx;
-
 	idx = srcu_read_lock(&kvm->srcu);
 	spin_lock(&kvm->mmu_lock);
 	/*
@@ -1470,15 +1467,15 @@ int kvm_read_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, void *data, int offset
 	void *kaddr;
 
 	if (kvm_record) {
+		addr = gfn_to_hva_read(kvm, gfn);
+		if (kvm_is_error_hva(addr)) {
+			printk(KERN_ERR "Tamlok - %s error hva for gfn 0x%llx\n", __func__, gfn);
+			return -EFAULT;
+		}		
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 0);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
-					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			//return -EFAULT;
-			//rsr-debug
-			dump_stack();
-			//end rsr-debug
-			goto normal;
+			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE\n", __func__);
+			return -EFAULT;
 		}
 		memcpy(data, kaddr + offset, len);
 		return 0;
@@ -1488,12 +1485,12 @@ normal:
 	//if(kvm_record) printk(KERN_ERR "XELATEX - %s, %d\n", __func__, __LINE__);
 	addr = gfn_to_hva_read(kvm, gfn);
 	if (kvm_is_error_hva(addr)) {
-		printk(KERN_ERR "XELATEX - %s normal fault, is error hva.\n", __func__);
+		//printk(KERN_ERR "XELATEX - %s normal fault, is error hva.\n", __func__);
 		return -EFAULT;
 	}
 	r = kvm_read_hva(data, (void __user *)addr + offset, len);
 	if (r) {
-		printk(KERN_ERR "XELATEX - %s normal fault, kvm_read_hva fail.\n", __func__);
+		//printk(KERN_ERR "XELATEX - %s normal fault, kvm_read_hva fail.\n", __func__);
 		return -EFAULT;
 	}
 	return 0;
@@ -1550,12 +1547,12 @@ int kvm_write_guest_page_kvm(struct kvm *kvm, gfn_t gfn, const void *data,
 
 	addr = gfn_to_hva(kvm, gfn);
 	if (kvm_is_error_hva(addr)) {
-		if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, is error hva\n", __func__, __LINE__);
+		//if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, is error hva\n", __func__, __LINE__);
 		return -EFAULT;
 	}
 	r = __copy_to_user((void __user *)addr + offset, data, len);
 	if (r) {
-		if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, copy_to_user fault\n", __func__, __LINE__);
+		//if(kvm_record) printk(KERN_ERR "%s, %d, normal fault, copy_to_user fault\n", __func__, __LINE__);
 		return -EFAULT;
 	}
 	mark_page_dirty(kvm, gfn);
@@ -1569,17 +1566,18 @@ int kvm_write_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn, const void *data,
 {
 	struct kvm *kvm = vcpu->kvm;
 	void *kaddr;
+	unsigned long addr;
 
 	if (kvm_record) {
+		addr = gfn_to_hva(kvm, gfn);
+		if (kvm_is_error_hva(addr)) {
+			printk(KERN_ERR "Tamlok - %s error hva for gfn 0x%llx\n", __func__, gfn);
+			return -EFAULT;
+		}		
 		kaddr = gfn_to_kaddr_ept(vcpu, gfn, 1);
 		if (kaddr == NULL) {
-			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE, gfn=0x%llx, offset=0x%x, memslot_id=%d\n",
-					__func__, gfn, offset, memslot_id(vcpu->kvm, gfn));
-			//rsr-debug
-			dump_stack();
-			//end rsr-debug
-			//return -EFAULT;
-			goto normal;
+			printk(KERN_ERR "XELATEX - %s get INVALID_PAGE\n", __func__);
+			return -EFAULT;
 		}
 		memcpy(kaddr + offset, data, len);
 		return 0;

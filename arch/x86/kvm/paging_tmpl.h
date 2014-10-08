@@ -208,7 +208,7 @@ retry_walk:
 			goto error;
 		real_gfn = gpa_to_gfn(real_gfn);
 
-		//print_record("XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
+		//print_record(0, "XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
 		// XELATEX
 		if (kvm_record && (kaddr = gfn_to_kaddr_ept(vcpu, real_gfn, 0)) != NULL) {
 			memcpy(&pte, kaddr + offset, sizeof(pte));
@@ -228,7 +228,7 @@ retry_walk:
 		}
 		walker->ptep_user[walker->level - 1] = ptep_user;
 
-		//print_record("XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
+		//print_record(0, "XELATEX %s, %d, real_gfn=0x%llx\n", __func__, __LINE__, real_gfn);
 		//if (pte == 0xf4f4f4f4f4f4f4f4)
 		//	printk(KERN_ERR "XELATEX %s, %d, pte=0x%llx\n", __func__, __LINE__, (u64)pte);
 
@@ -592,9 +592,10 @@ static int FNAME(page_fault)(struct kvm_vcpu *vcpu, gva_t addr, u32 error_code,
 	 */
 	if (!r) {
 		pgprintk("%s: guest page fault\n", __func__);
-		if (!prefault)
+		if (!prefault){
+			if (kvm_record)	print_record(0, "%s--%d-->inject_page_fault\n", __func__, __LINE__);
 			inject_page_fault(vcpu, &walker.fault);
-
+		}
 		return 0;
 	}
 

@@ -28,6 +28,11 @@
 #include "async_pf.h"
 #include <trace/events/kvm.h>
 
+//rsr-debug 
+//2 shoule be deleted soon!
+#include "../arch/x86/kvm/logger.h"
+//end rsr-debug
+
 static struct kmem_cache *async_pf_cache;
 
 int kvm_async_pf_init(void)
@@ -71,6 +76,8 @@ static void async_pf_execute(struct work_struct *work)
 	get_user_pages(current, mm, addr, 1, 1, 0, &page, NULL);
 	up_read(&mm->mmap_sem);
 	unuse_mm(mm);
+
+	if (kvm_record)	print_record(0, "%s--%d\n", __func__, __LINE__);
 
 	spin_lock(&vcpu->async_pf.lock);
 	list_add_tail(&apf->link, &vcpu->async_pf.done);
@@ -126,6 +133,7 @@ void kvm_check_async_pf_completion(struct kvm_vcpu *vcpu)
 
 	while (!list_empty_careful(&vcpu->async_pf.done) &&
 	      kvm_arch_can_inject_async_page_present(vcpu)) {
+		  
 		spin_lock(&vcpu->async_pf.lock);
 		work = list_first_entry(&vcpu->async_pf.done, typeof(*work),
 					      link);
@@ -134,6 +142,8 @@ void kvm_check_async_pf_completion(struct kvm_vcpu *vcpu)
 
 		if (work->page)
 			kvm_arch_async_page_ready(vcpu, work);
+
+		if (kvm_record) print_record(0, "%s--%d\n", __func__, __LINE__);
 		kvm_arch_async_page_present(vcpu, work);
 
 		list_del(&work->queue);
@@ -181,6 +191,8 @@ int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gva_t gva, gfn_t gfn,
 	if (!schedule_work(&work->work))
 		goto retry_sync;
 
+	if (kvm_record)	print_record(0, "%s--%d\n", __func__, __LINE__);
+
 	list_add_tail(&work->queue, &vcpu->async_pf.queue);
 	vcpu->async_pf.queued++;
 	kvm_arch_async_page_not_present(vcpu, work);
@@ -205,6 +217,8 @@ int kvm_async_pf_wakeup_all(struct kvm_vcpu *vcpu)
 
 	work->page = KVM_ERR_PTR_BAD_PAGE;
 	INIT_LIST_HEAD(&work->queue); /* for list_del to work */
+
+	if (kvm_record)	print_record(0, "%s--%d\n", __func__, __LINE__);
 
 	spin_lock(&vcpu->async_pf.lock);
 	list_add_tail(&work->link, &vcpu->async_pf.done);

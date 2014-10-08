@@ -40,6 +40,7 @@ static int kvm_set_pic_irq(struct kvm_kernel_irq_routing_entry *e,
 {
 #ifdef CONFIG_X86
 	struct kvm_pic *pic = pic_irqchip(kvm);
+
 	return kvm_pic_set_irq(pic, e->irqchip.pin, irq_source_id, level);
 #else
 	return -1;
