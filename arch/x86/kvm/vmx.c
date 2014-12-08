@@ -5908,6 +5908,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 					kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
 			}
 
+			tm_memory_commit(vcpu);
+
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
 		}
@@ -7204,14 +7206,14 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 */
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
-		vcpu->need_memory_commit = 1;
-		vcpu->rr_state = 1;
 		ret = vmx_tm_commit(vcpu);
 
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
 				vcpu->vcpu_id, __func__);
 		} else if (ret == 1) {
+			vcpu->need_memory_commit = 1;
+			vcpu->rr_state = 1;
 			return KVM_RR_COMMIT;
 		} else {
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);

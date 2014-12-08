@@ -321,6 +321,8 @@ struct kvm_vcpu {
 	int need_memory_commit;
 	int rr_state;
 
+	int consecutive_rb_time;
+
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
 	int check_rollback;
@@ -476,6 +478,7 @@ struct kvm {
 		unsigned long long tm_turn;
 	};
 	int tm_last_commit_vcpu;
+	atomic_t tm_must_commit_vcpu;
 };
 
 #define kvm_err(fmt, ...) \

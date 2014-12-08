@@ -6131,6 +6131,12 @@ restart:
 		vcpu->need_chkpt = 0;
 		vcpu->rr_state = 0;
 
+		 if (atomic_read(&(vcpu->kvm->tm_must_commit_vcpu)) != vcpu->vcpu_id &&
+		 	atomic_read(&(vcpu->kvm->tm_must_commit_vcpu)) != -1) {
+			while(atomic_read(&(vcpu->kvm->tm_must_commit_vcpu)) != -1)
+				yield();
+		}
+
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 		// Only for test
 		/*
@@ -6148,12 +6154,16 @@ restart:
 			++vcpu->nr_test;
 			print_record("vcpu=%d, KVM_RR_COMMIT, nr_test=%d\n",
 				vcpu->vcpu_id, vcpu->nr_test);
-			kvm_x86_ops->tm_memory_commit(vcpu);
+			//kvm_x86_ops->tm_memory_commit(vcpu);
 			vcpu->need_chkpt = 1;
 			commit_count++;
 			// if (vcpu->nr_test % 100 == 98)
 			// 	mirror_flag = 1;
 			kvm_x86_ops->tlb_flush(vcpu);
+			vcpu->consecutive_rb_time = 0;
+			if (atomic_read(&(vcpu->kvm->tm_must_commit_vcpu)) == vcpu->vcpu_id) {
+				atomic_set(&(vcpu->kvm->tm_must_commit_vcpu), -1);
+			}
 		} else if (r == KVM_RR_ROLLBACK) {
 			print_record("vcpu=%d, KVM_RR_ROLLBACK, nr_test=%d\n",
 				vcpu->vcpu_id, vcpu->nr_test);
@@ -6183,6 +6193,12 @@ restart:
 			}
 			mutex_unlock(&(vcpu->events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+			vcpu->consecutive_rb_time ++;
+			print_record("vcpu=%d, consecutive rollback time %d\n",
+				vcpu->vcpu_id, vcpu->consecutive_rb_time);
+			if (vcpu->consecutive_rb_time == 10) {
+				atomic_set(&(vcpu->kvm->tm_must_commit_vcpu), vcpu->vcpu_id);
+			}
 			goto restart;
 		}
 	}
@@ -7118,6 +7134,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&(vcpu->events_list));
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->nr_test = 0;
+	atomic_set(&(vcpu->kvm->tm_must_commit_vcpu), -1);
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;
