@@ -5903,7 +5903,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			#endif
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 			#ifdef RR_PROFILE
-			vcpu->rr_states.walk_mmu_time+= rr_rdtsc() - tsc_before_walk_mmu;
+			uint64_t tsc_after_walk_mmu = rr_rdtsc();
+			if (tsc_after_walk_mmu > tsc_before_walk_mmu)
+				vcpu->rr_states.walk_mmu_time+= tsc_after_walk_mmu - tsc_before_walk_mmu;
 			#endif
 		}
 		kvm->timestamp ++;
@@ -5934,7 +5936,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			// Clear conflict bitmap
 			bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
 			#ifdef RR_PROFILE
-			vcpu->rr_states.detect_conflict_time+= rr_rdtsc() - tsc_before_detect_conflict;
+			uint64_t tsc_after_detect_conflict = rr_rdtsc();
+			if (tsc_after_detect_conflict > tsc_before_detect_conflict)
+				vcpu->rr_states.detect_conflict_time += tsc_after_detect_conflict - tsc_before_detect_conflict;
 			#endif
 		}
 
@@ -5963,7 +5967,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 					kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
 			}
 			#ifdef RR_PROFILE
-			vcpu->rr_states.set_dirty_bit_time+= rr_rdtsc() - tsc_before_set_dirty_bit;
+			uint64_t tsc_after_set_dirty_bit = rr_rdtsc();
+			if (tsc_after_set_dirty_bit > tsc_before_set_dirty_bit)
+				vcpu->rr_states.set_dirty_bit_time += tsc_after_set_dirty_bit - tsc_before_set_dirty_bit;
 			#endif
 
 			/* Commit here in the lock */
@@ -5972,7 +5978,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			#endif
 			tm_memory_commit(vcpu);
 			#ifdef RR_PROFILE
-			vcpu->rr_states.page_commit_time += rr_rdtsc() - tsc_before_memory_commit;
+			uint64_t tsc_after_memory_commit = rr_rdtsc();
+			if (tsc_after_memory_commit > tsc_before_memory_commit)
+				vcpu->rr_states.page_commit_time += tsc_after_memory_commit - tsc_before_memory_commit;
 			#endif
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
@@ -7699,9 +7707,9 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	if (kvm_record) {
 		tsc_before_enter = rr_rdtsc();
 		//print_record("PROFILE: vcpu=%d, tsc_before_enter=0x%llu\n", vcpu->vcpu_id, tsc_before_enter);
-		if (tsc_after_enter != 0 && vcpu->rr_states.if_add_kvm_time) {
+		//if (tsc_after_enter != 0 && vcpu->rr_states.if_add_kvm_time) {
+		if (tsc_after_enter != 0 && tsc_before_enter > tsc_after_enter)
 			vcpu->rr_states.kvm_time += tsc_before_enter - tsc_after_enter;
-		}
 	}
 	#endif
 
@@ -7833,7 +7841,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	if (kvm_record) {
 		tsc_after_enter = rr_rdtsc();
 		//print_record("PROFILE: vcpu=%d, tsc_after_enter=0x%llu\n", vcpu->vcpu_id, tsc_after_enter);
-		if (tsc_before_enter != 0) {
+		if (tsc_before_enter != 0 && tsc_after_enter > tsc_before_enter) {
 			vcpu->rr_states.vm_time += tsc_after_enter - tsc_before_enter;
 		}
 	}

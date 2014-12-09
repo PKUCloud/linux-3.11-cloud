@@ -6149,11 +6149,9 @@ restart:
 		r = kvm_x86_ops->check_rr_commit(vcpu);
 
 		#ifdef RR_PROFILE
-		vcpu->rr_states.total_commit_time += rr_rdtsc() - tsc_before_commit;
-		if (r != KVM_RR_COMMIT && r != KVM_RR_ROLLBACK)
-			vcpu->rr_states.if_add_kvm_time = 0;
-		else
-			vcpu->rr_states.if_add_kvm_time = 1;
+		uint64_t tsc_after_commit = rr_rdtsc();
+		if (tsc_after_commit > tsc_before_commit)
+			vcpu->rr_states.total_commit_time += tsc_after_commit - tsc_before_commit;
 		#endif
 		// Only for test
 		/*
