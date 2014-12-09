@@ -47,6 +47,8 @@
 
 #include "trace.h"
 
+#include <linux/rr_profile.h>
+
 #define __ex(x) __kvm_handle_fault_on_reboot(x)
 #define __ex_clear(x, reg) \
 	____kvm_handle_fault_on_reboot(x, "xor " reg " , " reg)
@@ -5717,6 +5719,12 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	printk(KERN_ERR "XELATEX - disable kvm_record, vcpu=%d, nr_sync=%llu,"
 			"nr_vmexit=%llu, nr_conflict=%llu\n",
 			vcpu->vcpu_id, vcpu->nr_sync, vcpu->nr_vmexit, vcpu->nr_conflict);
+	printk(KERN_ERR "PROFILE: vcpu=%d, vm_time=%llu, kvm_time=%llu,"
+		" total_commit_time=%llu, page_commit_time=%llu, walk_mmu_time=%llu, "
+		"set_dirty_bit_time=%llu, detect_conflict_time=%llu\n",
+		vcpu->vcpu_id, vcpu->rr_states.vm_time, vcpu->rr_states.kvm_time, vcpu->rr_states.total_commit_time,
+		vcpu->rr_states.page_commit_time, vcpu->rr_states.walk_mmu_time, vcpu->rr_states.set_dirty_bit_time,
+		vcpu->rr_states.detect_conflict_time);
 	kvm_record = false;
 	kvm->record_master = false;
 	kvm->tm_last_commit_vcpu = -1;
@@ -5880,9 +5888,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
 }
 
-
-
-
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -5892,8 +5897,15 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 
 	if (vcpu->is_recording) {
 		if (kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MMU ||
-				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT)
+				kvm_record_mode == KVM_RECORD_HARDWARE_WALK_MEMSLOT) {
+			#ifdef RR_PROFILE
+			uint64_t tsc_before_walk_mmu = rr_rdtsc();
+			#endif
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
+			#ifdef RR_PROFILE
+			vcpu->rr_states.walk_mmu_time+= rr_rdtsc() - tsc_before_walk_mmu;
+			#endif
+		}
 		kvm->timestamp ++;
 
 		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
@@ -5911,6 +5923,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 		mutex_lock(&(kvm->tm_lock));
 
 		if (kvm->tm_last_commit_vcpu != vcpu->vcpu_id) {
+			#ifdef RR_PROFILE
+			uint64_t tsc_before_detect_conflict = rr_rdtsc();
+			#endif
 			// Detect conflict
 			if (tm_detect_conflict(vcpu->access_bitmap, vcpu->conflict_bitmap, TM_BITMAP_SIZE)) {
 				commit = 0;
@@ -5918,6 +5933,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			}
 			// Clear conflict bitmap
 			bitmap_clear(vcpu->conflict_bitmap, 0, TM_BITMAP_SIZE);
+			#ifdef RR_PROFILE
+			vcpu->rr_states.detect_conflict_time+= rr_rdtsc() - tsc_before_detect_conflict;
+			#endif
 		}
 
 		if (commit) {
@@ -5935,15 +5953,27 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 				goto unlock;
 			}
 			// Set dirty bit
+			#ifdef RR_PROFILE
+			uint64_t tsc_before_set_dirty_bit = rr_rdtsc();
+			#endif
 			for (i=0; i<online_vcpus; i++) {
 				if (kvm->vcpus[i]->vcpu_id == vcpu->vcpu_id)
 					continue;
 				bitmap_or(kvm->vcpus[i]->conflict_bitmap, vcpu->dirty_bitmap,
 					kvm->vcpus[i]->conflict_bitmap, TM_BITMAP_SIZE);
 			}
+			#ifdef RR_PROFILE
+			vcpu->rr_states.set_dirty_bit_time+= rr_rdtsc() - tsc_before_set_dirty_bit;
+			#endif
 
 			/* Commit here in the lock */
+			#ifdef RR_PROFILE
+			uint64_t tsc_before_memory_commit = rr_rdtsc();
+			#endif
 			tm_memory_commit(vcpu);
+			#ifdef RR_PROFILE
+			vcpu->rr_states.page_commit_time += rr_rdtsc() - tsc_before_memory_commit;
+			#endif
 			// Set last commit vcpu
 			kvm->tm_last_commit_vcpu = vcpu->vcpu_id;
 
@@ -7264,7 +7294,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		print_record("vcpu=%d, EXIT_REASON_EPT_MISCONFIG\n", vcpu->vcpu_id);
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 */
-	
+/*
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
@@ -7281,7 +7311,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	}
 
 	return KVM_RR_SKIP;
-
+*/
 	switch (exit_reason) {
 	/* IO */
 	case EXIT_REASON_IO_INSTRUCTION:
@@ -7622,6 +7652,7 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	unsigned long debugctlmsr;
+	static uint64_t tsc_before_enter = 0, tsc_after_enter = 0;
 
 	/* Record the guest's net vcpu time for enforced NMI injections. */
 	if (unlikely(!cpu_has_virtual_nmis() && vmx->soft_vnmi_blocked))
@@ -7662,6 +7693,17 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		}
 		spin_unlock(&(vcpu->kvm->tm_timer_lock));
 	}
+
+	// XELATEX profiling
+	#ifdef RR_PROFILE
+	if (kvm_record) {
+		tsc_before_enter = rr_rdtsc();
+		//print_record("PROFILE: vcpu=%d, tsc_before_enter=0x%llu\n", vcpu->vcpu_id, tsc_before_enter);
+		if (tsc_after_enter != 0 && vcpu->rr_states.if_add_kvm_time) {
+			vcpu->rr_states.kvm_time += tsc_before_enter - tsc_after_enter;
+		}
+	}
+	#endif
 
 	vmx->__launched = vmx->loaded_vmcs->launched;
 	asm(
@@ -7785,6 +7827,17 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	loadsegment(ds, __USER_DS);
 	loadsegment(es, __USER_DS);
 #endif
+
+	// XELATEX profiling
+	#ifdef RR_PROFILE
+	if (kvm_record) {
+		tsc_after_enter = rr_rdtsc();
+		//print_record("PROFILE: vcpu=%d, tsc_after_enter=0x%llu\n", vcpu->vcpu_id, tsc_after_enter);
+		if (tsc_before_enter != 0) {
+			vcpu->rr_states.vm_time += tsc_after_enter - tsc_before_enter;
+		}
+	}
+	#endif
 
 	vcpu->arch.regs_avail = ~((1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP)
 				  | (1 << VCPU_EXREG_RFLAGS)

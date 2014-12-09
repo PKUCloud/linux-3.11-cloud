@@ -69,6 +69,8 @@
 //end kvm_vcpu_checkpoint_rollback rsr
 #include "logger.h"
 
+#include <linux/rr_profile.h>
+
 #define MAX_IO_MSRS 256
 #define KVM_MAX_MCE_BANKS 32
 #define KVM_MCE_CAP_SUPPORTED (MCG_CTL_P | MCG_SER_P)
@@ -6140,7 +6142,19 @@ restart:
 		vcpu->need_chkpt = 0;
 		vcpu->rr_state = 0;
 
+		#ifdef RR_PROFILE
+		uint64_t tsc_before_commit = rr_rdtsc();
+		#endif
+
 		r = kvm_x86_ops->check_rr_commit(vcpu);
+
+		#ifdef RR_PROFILE
+		vcpu->rr_states.total_commit_time += rr_rdtsc() - tsc_before_commit;
+		if (r != KVM_RR_COMMIT && r != KVM_RR_ROLLBACK)
+			vcpu->rr_states.if_add_kvm_time = 0;
+		else
+			vcpu->rr_states.if_add_kvm_time = 1;
+		#endif
 		// Only for test
 		/*
 		if (r != KVM_RR_SKIP && r != KVM_RR_ERROR) {
@@ -7127,6 +7141,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&(vcpu->events_list));
 	mutex_init(&(vcpu->events_list_lock));
 	vcpu->nr_test = 0;
+	memset(&(vcpu->rr_states), 0, sizeof(struct vcpu_rr_states));
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	vcpu->check_rollback = 0;

@@ -37,6 +37,7 @@
 #include <asm/kvm_checkpoint_rollback.h>
 //end kvm_vcpu_checkpoint_rollback rsr
 
+#include <linux/rr_profile.h>
 
 #ifndef KVM_MMIO_SIZE
 #define KVM_MMIO_SIZE 8
@@ -322,6 +323,8 @@ struct kvm_vcpu {
 
 	int need_memory_commit;
 	int rr_state;
+
+	struct vcpu_rr_states rr_states;
 
 	//kvm_vcpu_checkpoint_rollback rsr
 	struct CPUX86State vcpu_checkpoint;
