@@ -5725,6 +5725,15 @@ void tm_disable(struct kvm_vcpu *vcpu)
 		vcpu->vcpu_id, vcpu->rr_states.vm_time, vcpu->rr_states.kvm_time, vcpu->rr_states.total_commit_time,
 		vcpu->rr_states.page_commit_time, vcpu->rr_states.walk_mmu_time, vcpu->rr_states.set_dirty_bit_time,
 		vcpu->rr_states.detect_conflict_time);
+	mutex_lock(&kvm->tm_lock);
+	print_record("PROFILE: vcpu=%d, \n",vcpu->vcpu_id);
+	print_record("exit_reason,num,time\n");
+	for (i=0; i<60; i++)
+		print_record("%d,%llu,%llu\n", i,
+			vcpu->rr_states.vmexit_states[i].num, vcpu->rr_states.vmexit_states[i].time);
+	print_record("\n");
+	mutex_unlock(&kvm->tm_lock);
+
 	kvm_record = false;
 	kvm->record_master = false;
 	kvm->tm_last_commit_vcpu = -1;
@@ -7170,6 +7179,12 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 		//if (exit_reason != EXIT_REASON_EPT_VIOLATION)
 		//	printk(KERN_INFO "vcpu=%d, %s, exit_reason=%u\n", vcpu->vcpu_id, __func__, exit_reason);
 	}
+	#ifdef RR_PROFILE
+	if (kvm_record) {
+		vcpu->rr_states.exit_reason = exit_reason;
+		vcpu->rr_states.vmexit_states[exit_reason].num ++;
+	}
+	#endif
 
 	// XELATEX
 	if (kvm_record && kvm_record_type == KVM_RECORD_TIMER
@@ -7708,8 +7723,11 @@ static void __noclone vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		tsc_before_enter = rr_rdtsc();
 		//print_record("PROFILE: vcpu=%d, tsc_before_enter=0x%llu\n", vcpu->vcpu_id, tsc_before_enter);
 		//if (tsc_after_enter != 0 && vcpu->rr_states.if_add_kvm_time) {
-		if (tsc_after_enter != 0 && tsc_before_enter > tsc_after_enter)
+		if (tsc_after_enter != 0 && tsc_before_enter > tsc_after_enter) {
 			vcpu->rr_states.kvm_time += tsc_before_enter - tsc_after_enter;
+			vcpu->rr_states.vmexit_states[vcpu->rr_states.exit_reason].time +=
+				tsc_before_enter - tsc_after_enter;
+		}
 	}
 	#endif
 

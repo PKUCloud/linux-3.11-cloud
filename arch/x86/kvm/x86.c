@@ -6152,6 +6152,7 @@ restart:
 		uint64_t tsc_after_commit = rr_rdtsc();
 		if (tsc_after_commit > tsc_before_commit)
 			vcpu->rr_states.total_commit_time += tsc_after_commit - tsc_before_commit;
+
 		#endif
 		// Only for test
 		/*

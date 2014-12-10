@@ -324,6 +324,7 @@ struct kvm_vcpu {
 	int need_memory_commit;
 	int rr_state;
 
+	// XELATEX profile
 	struct vcpu_rr_states rr_states;
 
 	//kvm_vcpu_checkpoint_rollback rsr
