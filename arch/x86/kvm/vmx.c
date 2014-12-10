@@ -6030,7 +6030,6 @@ unlock:
 		goto record_disable;
 	}
 
-	vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 	if (kvm_record_mode == KVM_RECORD_SOFTWARE) {
 		vcpu->mmu_vcpu_valid_gen ++;
 		// Zap all mmu pages every TM_MMU_INVALID_GEN turns
@@ -7345,7 +7344,10 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "error: %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
-		} else if (ret == 1) {
+			return KVM_RR_ERROR;
+		}
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
+		if (ret == 1) {
 			vcpu->need_memory_commit = 1;
 			vcpu->rr_state = 1;
 			return KVM_RR_COMMIT;
