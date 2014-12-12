@@ -7320,6 +7320,17 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 */
 
+
+	// OPTIMIZATION
+	// Check commit when this vmexit is close to preemption timeout
+	preemption_timer = vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
+	if (preemption_timer <= (u32)(kvm_record_timer_value * preemption_timeout_rate / 100)) {
+		//print_record("PROFILE: vcpu=%d, preemption_timer=%d, exit_reason=%d\n",
+		//	vcpu->vcpu_id, preemption_timer, exit_reason);
+		exit_reason = EXIT_REASON_PREEMPTION_TIMER;
+	}
+
+
 	if (exit_reason != EXIT_REASON_EPT_VIOLATION && exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
 		#ifdef RR_PROFILE
 		chunk_size = kvm_record_timer_value - vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
