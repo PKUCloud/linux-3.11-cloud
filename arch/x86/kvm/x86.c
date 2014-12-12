@@ -6121,6 +6121,7 @@ restart:
 
 	//if (kvm_record)
 	//	printk(KERN_INFO "vcpu %d exit\n", vcpu->vcpu_id);
+
 	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 	/*
@@ -6205,7 +6206,11 @@ restart:
 			}
 			mutex_unlock(&(vcpu->events_list_lock));
 			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+			print_record("vcpu=%d, rollback touch here\n", vcpu->vcpu_id);
 			goto restart;
+		}
+		else {
+			//print_record("vcpu=%d, KVM_RR_SKIP\n", vcpu->vcpu_id);
 		}
 	}
 	r = kvm_x86_ops->handle_exit(vcpu);

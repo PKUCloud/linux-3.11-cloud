@@ -7291,6 +7291,9 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	u32 exit_reason = vmx->exit_reason;
 	int ret;
+	u32 preemption_timer;
+	const u32 preemption_timeout_rate = 5;
+	u32 chunk_size;
 
 	vcpu->need_memory_commit = 0;
 	// First time, we do not handle it here.
@@ -7316,8 +7319,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		print_record("vcpu=%d, EXIT_REASON_EPT_MISCONFIG\n", vcpu->vcpu_id);
 	} else print_record("vcpu=%d, %s exit_reason %d\n", vcpu->vcpu_id, __func__, exit_reason);
 */
-/*
-	if (exit_reason != EXIT_REASON_EPT_VIOLATION) {
+
+	if (exit_reason != EXIT_REASON_EPT_VIOLATION && exit_reason != EXIT_REASON_PAUSE_INSTRUCTION) {
+		#ifdef RR_PROFILE
+		chunk_size = kvm_record_timer_value - vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
+		print_record("PROFILE_CHUNK_SIZE,vcpu=%d,%d\n", vcpu->vcpu_id, chunk_size);
+		#endif
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "vcpu=%d, error: %s vmx_tm_commit returns -1\n",
@@ -7333,7 +7341,28 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	}
 
 	return KVM_RR_SKIP;
+
+/*
+	if (exit_reason == EXIT_REASON_TRIPLE_FAULT) {
+		printk(KERN_ERR "error: Triple Fault! Why here? Rollback and try again.\n");
+		return KVM_RR_ROLLBACK;
+	}
+/*
+	// OPTIMIZATION
+	// Check commit when this vmexit is close to preemption timeout
+	preemption_timer = vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
+	if (preemption_timer <= (u32)(kvm_record_timer_value * preemption_timeout_rate / 100)
+			&& exit_reason != EXIT_REASON_EPT_VIOLATION) {
+		print_record("PROFILE: vcpu=%d, preemption_timer=%d, exit_reason=%d\n",
+			vcpu->vcpu_id, preemption_timer, exit_reason);
+		exit_reason = EXIT_REASON_PREEMPTION_TIMER;
+	}
 */
+
+	#ifdef RR_PROFILE
+	print_record("PROFILE_EXIT_SIZE,vcpu=%d,%d\n", vcpu->vcpu_id, kvm_record_timer_value - preemption_timer);
+	#endif
+
 	switch (exit_reason) {
 	/* IO */
 	case EXIT_REASON_IO_INSTRUCTION:
@@ -7341,12 +7370,17 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 	case EXIT_REASON_EPT_MISCONFIG:
 	/* PREEMPTION */
 	case EXIT_REASON_PREEMPTION_TIMER:
+		#ifdef RR_PROFILE
+		chunk_size = kvm_record_timer_value - vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
+		print_record("PROFILE_CHUNK_SIZE,vcpu=%d,%d\n", vcpu->vcpu_id, chunk_size);
+		#endif
+		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
+
 		ret = vmx_tm_commit(vcpu);
 		if (ret == -1) {
 			printk(KERN_ERR "error: %s, %d, vmx_tm_commit returns -1\n", __func__, __LINE__);
 			return KVM_RR_ERROR;
 		}
-		vmcs_write32(VMX_PREEMPTION_TIMER_VALUE, kvm_record_timer_value);
 		if (ret == 1) {
 			vcpu->need_memory_commit = 1;
 			vcpu->rr_state = 1;
@@ -7356,6 +7390,7 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			return KVM_RR_ROLLBACK;
 		}
 	}
+
 	return KVM_RR_SKIP;
 }
 
