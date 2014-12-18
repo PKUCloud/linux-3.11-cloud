@@ -2,7 +2,8 @@
 #define __RR_PROFILE_H
 
 
-#define RR_PROFILE
+//#define RR_PROFILE
+#define RR_AD_BIT_OPT
 
 struct vmexit_states {
 	uint64_t num;

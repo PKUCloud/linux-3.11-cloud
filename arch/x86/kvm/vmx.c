@@ -7358,7 +7358,6 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 		printk(KERN_ERR "error: Triple Fault! Why here? Rollback and try again.\n");
 		return KVM_RR_ROLLBACK;
 	}
-/*
 	// OPTIMIZATION
 	// Check commit when this vmexit is close to preemption timeout
 	preemption_timer = vmcs_read32(VMX_PREEMPTION_TIMER_VALUE);
