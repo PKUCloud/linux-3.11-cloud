@@ -308,6 +308,7 @@ struct kvm_vcpu {
 	DECLARE_BITMAP(access_bitmap, TM_BITMAP_SIZE);
 	DECLARE_BITMAP(dirty_bitmap, TM_BITMAP_SIZE);
 	DECLARE_BITMAP(conflict_bitmap, TM_BITMAP_SIZE);
+	DECLARE_BITMAP(DMA_access_bitmap, TM_BITMAP_SIZE);
 	gfn_t access_size;
 	gfn_t dirty_size;
 	gfn_t conflict_size;

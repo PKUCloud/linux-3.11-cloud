@@ -5942,6 +5942,12 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 			tm_memory_commit_page(private_page);
 			list_move_tail(&private_page->link, &temp_list);
 		}
+		// Check if it is touched by DMA
+		else if (test_bit(gfn, vcpu->DMA_access_bitmap)) {
+			origin = pfn_to_kaddr(private_page->original_pfn);
+			private = pfn_to_kaddr(private_page->private_pfn);
+			copy_page(private, origin);
+		}
 	}
 
 	if (!list_empty(&temp_list)) {
@@ -6006,22 +6012,34 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 
 
 	// TEST: Copye inconsistent page
-	list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
-				 link) {
-		int i;
-		origin = pfn_to_kaddr(private_page->original_pfn);
-		private = pfn_to_kaddr(private_page->private_pfn);
-		for (i=0; i < PAGE_SIZE; i++) {
-			if (((char *)origin)[i] != ((char *)private)[i]) {
-				print_record("vcpu=%d, %s, content inconsistent, gfn=0x%llx, "
-					"original_pfn=0x%llx, private_pfn=0x%llx, pos=%d\n",
-					vcpu->vcpu_id, __func__, private_page->gfn,
-					private_page->original_pfn, private_page->private_pfn, i);
-				copy_page(private, origin);
-				//break;
-			}
-		}
-	}
+	//list_for_each_entry_safe(private_page, temp, &vcpu->arch.holding_pages,
+	//			 link) {
+	//	int i;
+	//	//int conflict = 0;
+	//	gfn = private_page->gfn;
+	//	origin = pfn_to_kaddr(private_page->original_pfn);
+	//	private = pfn_to_kaddr(private_page->private_pfn);
+	//	if (test_bit(gfn, vcpu->DMA_access_bitmap))
+	//		copy_page(private, origin);
+		//for (i=0; i < PAGE_SIZE; i++) {
+		//	if (((char *)origin)[i] != ((char *)private)[i]) {
+		//		print_record("vcpu=%d, %s, content inconsistent, gfn=0x%llx, "
+		//			"original_pfn=0x%llx, private_pfn=0x%llx, pos=%d\n",
+		//			vcpu->vcpu_id, __func__, private_page->gfn,
+		//			private_page->original_pfn, private_page->private_pfn, i);
+		//		copy_page(private, origin);
+		//		if (!test_bit(gfn, vcpu->DMA_access_bitmap)) {
+		//			print_record("vcpu=%d, %s, content different but no conflict in DMA_access_bitmap, gfn=0x%llx\n",
+		//				vcpu->vcpu_id, __func__, gfn);
+		//		}
+		//		conflict = 1;
+		//		//break;
+		//	}
+		//}
+		//if (conflict == 0 && test_bit(gfn, vcpu->DMA_access_bitmap))
+		//	print_record("vcpu=%d, %s, conflict in DMA_access_bitmap but content is the same, gfn=0x%llx\n",
+		//		vcpu->vcpu_id, __func__, gfn);
+	//}
 
 /*
 	// TEST: Handle exit_reason == EXIT_REASON_IO_INSTRUCTION
@@ -6302,6 +6320,7 @@ int tm_commit_memory_again(struct kvm_vcpu *vcpu)
 	/* Reset bitmaps */
 	bitmap_clear(vcpu->access_bitmap, 0, TM_BITMAP_SIZE);
 	bitmap_clear(vcpu->dirty_bitmap, 0, TM_BITMAP_SIZE);
+	bitmap_clear(vcpu->DMA_access_bitmap, 0, TM_BITMAP_SIZE);
 
 	/* Should not use kvm_make_request here */
 	vmx_flush_tlb(vcpu);
