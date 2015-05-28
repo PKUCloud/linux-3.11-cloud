@@ -5869,10 +5869,53 @@ int tm_detect_and_print_conflict(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-int tm_detect_conflict(struct region_bitmap *access_bm,
+extern void kvm_record_gfn_to_gva_check(struct kvm_vcpu *vcpu,
+					unsigned long *gfns, int nr_gfns);
+
+int tm_detect_conflict(struct kvm_vcpu *vcpu, struct region_bitmap *access_bm,
 		       struct region_bitmap *conflict_bm)
 {
-	return re_bitmap_intersects(conflict_bm, access_bm);	/* Notice the order */
+	int res;
+	unsigned long *conflict_gfns;
+	int nr_conflict_gfns = 0;
+	/*
+	int i;
+	int index;
+	struct kvm *kvm = vcpu->kvm;
+	int slot_id;
+	*/
+	/* Notice the order */
+	res = re_bitmap_intersects(conflict_bm, access_bm, &conflict_gfns,
+				   &nr_conflict_gfns);
+	if (res) {
+		/*
+		for (i = 0, index = 0; i < nr_conflict_gfns; ++i) {
+			slot_id = memslot_id(kvm, conflict_gfns[i]);
+			if (slot_id == 8) {
+				conflict_gfns[index++] = conflict_gfns[i];
+			} else {
+				print_real_log("error: vcpu=%d gfn 0x%llx "
+					       "slot_id %d\n", vcpu->vcpu_id,
+					       conflict_gfns[i], slot_id);
+			}
+		}
+		nr_conflict_gfns = index;
+		*/
+		/* Translate gfn to gvn */
+		/*
+		for (i = 0; i < nr_conflict_gfns; ++i) {
+			print_real_log("vcpu=%d conflict gfn 0x%llx\n",
+				       vcpu->vcpu_id, conflict_gfns[i]);
+		}
+		*/
+		print_real_log("vcpu=%d nr_conflict_gfns %d\n", vcpu->vcpu_id,
+			       nr_conflict_gfns);
+		kvm_record_gfn_to_gva_check(vcpu, conflict_gfns,
+					    nr_conflict_gfns);
+		kfree(conflict_gfns);
+	}
+
+	return res;
 }
 
 int tm_unsync_init(void *opaque)
@@ -6426,6 +6469,8 @@ inline void record_real_log(struct kvm_vcpu *vcpu)
 	print_real_log("%d %lx %lx %x\n", vcpu->vcpu_id, rip, rcx, bc);
 }
 
+extern void kvm_record_clean_ept(struct kvm_vcpu *vcpu);
+
 int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -6474,9 +6519,9 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 						vcpu->public_cb, TM_BITMAP_SIZE)) {
 			#else
 			if (vcpu->is_early_rb ||
-			    tm_detect_conflict(&vcpu->access_bitmap,
+			    tm_detect_conflict(vcpu, &vcpu->access_bitmap,
 					       vcpu->public_cb) ||
-			    tm_detect_conflict(&vcpu->access_bitmap,
+			    tm_detect_conflict(vcpu, &vcpu->access_bitmap,
 					       &vcpu->DMA_access_bitmap)) {
 			#endif
 				commit = 0;
@@ -6552,6 +6597,8 @@ rollback:
 
 		swap(vcpu->public_cb, vcpu->private_cb);
 		mutex_unlock(&(kvm->tm_lock));
+
+		kvm_record_clean_ept(vcpu);
 
 		PROFILE_BEGIN(memory_time);
 		if (commit) {
@@ -8004,11 +8051,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			if (is_early_check == 1)
 				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, COMMIT=========\n", vcpu->vcpu_id);
+			print_real_log("vcpu=%d commit\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
 			vcpu->need_check_chunk_info = 1;
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, ROLLBACK=========\n", vcpu->vcpu_id);
+			print_real_log("vcpu=%d rollback\n", vcpu->vcpu_id);
 			return KVM_RR_ROLLBACK;
 		}
 	}

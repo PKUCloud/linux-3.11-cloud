@@ -165,21 +165,39 @@ static inline void re_bitmap_or(struct region_bitmap *dst,
 }
 
 static inline int re_bitmap_intersects(struct region_bitmap *bitmap1,
-				       struct region_bitmap *bitmap2)
+				       struct region_bitmap *bitmap2,
+				       unsigned long **conflict_gfns,
+				       int *nr_conflict_gfns)
 {
 	int i, size;
 	struct bits_list *blist = &bitmap2->blist;
+	unsigned long *gfns;
+	int index = 0;
+	int res = 0;
 
 	/* Assumptions based on our system */
 	if (unlikely(!bitmap2->bits_list_valid || bitmap1->bits_list_valid)) {
 		printk(KERN_ERR "error: %s region_bitmap error\n", __func__);
 	}
 	size = blist->nbits;
-	for (i = 0; i < size; ++i) {
-		if (re_test_bit(blist->bits[i], bitmap1))
-			return 1;
+	gfns = kmalloc(size * sizeof(*gfns), GFP_ATOMIC);
+	if (unlikely(!gfns)) {
+		printk(KERN_ERR "error: %s fail to kmalloc()\n", __func__);
 	}
-	return 0;
+	for (i = 0; i < size; ++i) {
+		if (re_test_bit(blist->bits[i], bitmap1)) {
+			res = 1;
+			if (likely(gfns))
+				gfns[index++] = blist->bits[i];
+		}
+	}
+	if (!res)
+		kfree(gfns);
+	else {
+		*nr_conflict_gfns = index;
+		*conflict_gfns = gfns;
+	}
+	return res;
 }
 
 #endif

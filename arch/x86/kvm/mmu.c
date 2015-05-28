@@ -3346,7 +3346,6 @@ void kvm_record_check_ept_ad(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(kvm_record_check_ept_ad);
 
-
 static void kvm_send_hwpoison_signal(unsigned long address, struct task_struct *tsk)
 {
 	siginfo_t info;
@@ -5318,6 +5317,87 @@ int kvm_mmu_get_spte_hierarchy(struct kvm_vcpu *vcpu, u64 addr, u64 sptes[4])
 	return nr_sptes;
 }
 EXPORT_SYMBOL_GPL(kvm_mmu_get_spte_hierarchy);
+
+static inline gfn_t gpte_to_gfn(u64 gpte)
+{
+	return (gpte & PT64_LVL_ADDR_MASK(PT_PAGE_TABLE_LEVEL)) >> PAGE_SHIFT;
+}
+
+static void __search_gfn(struct kvm_vcpu *vcpu, unsigned long *gfns,
+			 int nr_gfns, u64 pte, gva_t gva, int is_pte)
+{
+	gfn_t target_gfn = gpte_to_gfn(pte);
+	int i;
+	int is_super = !(pte & PT_USER_MASK);
+
+	for (i = 0; i < nr_gfns; ++i) {
+		if (target_gfn == gfns[i]) {
+			print_real_log("vcpu=%d super %d is_pte %d pte 0x%llx\n",
+				       vcpu->vcpu_id, is_super, is_pte, pte);
+			break;
+		}
+	}
+}
+
+static void __mmu_walk_pt_gfn_to_gva(struct kvm_vcpu *vcpu, unsigned long *gfns,
+				     int nr_gfns, u64 pte, int level,
+				     gva_t gva)
+{
+	u64 index;
+	gva_t new_gva;
+	u64 new_pte;
+	gfn_t table_gfn;
+	void *table;
+	struct kvm_mmu *mmu = &(vcpu->arch.mmu);
+
+	if (level < PT_PAGE_TABLE_LEVEL)
+		return;
+
+	/* Read the guest page table */
+	table = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+	if (!table) {
+		printk("error: %s fail to kmalloc()\n", __func__);
+		return;
+	}
+	table_gfn = gpte_to_gfn(pte);
+	if (unlikely(kvm_read_guest_page(vcpu, table_gfn, table, 0,
+					 PAGE_SIZE))) {
+		printk("error: %s fail to read guest page\n", __func__);
+		goto out;
+	}
+	__search_gfn(vcpu, gfns, nr_gfns, pte, gva, 1);
+	for (index = 0; index < PT64_NR_PT_ENTRY; ++index) {
+		new_pte = *((u64 *)table + index);
+		if (!is_present_gpte(new_pte))
+			continue;
+		new_gva = SHADOW_PT_ADDR(gva, index, level);
+		if (is_last_gpte(mmu, level, new_pte)) {
+			__search_gfn(vcpu, gfns, nr_gfns, new_pte, new_gva, 0);
+		} else {
+			__mmu_walk_pt_gfn_to_gva(vcpu, gfns, nr_gfns, new_pte,
+						 level - 1, new_gva);
+		}
+	}
+
+out:
+	kfree(table);
+}
+
+/* Given @gfns, translate them into gvas, and check whether they are in kernel
+ * space or not.
+ */
+void kvm_record_gfn_to_gva_check(struct kvm_vcpu *vcpu, unsigned long *gfns,
+				 int nr_gfns)
+{
+	struct kvm_mmu *mmu = &(vcpu->arch.mmu);
+	int level = mmu->root_level;
+	u64 pte = mmu->get_cr3(vcpu);
+
+	ASSERT(level == PT64_ROOT_LEVEL);
+
+	__mmu_walk_pt_gfn_to_gva(vcpu, gfns, nr_gfns, pte, level, 0);
+}
+EXPORT_SYMBOL_GPL(kvm_record_gfn_to_gva_check);
 
 void kvm_mmu_destroy(struct kvm_vcpu *vcpu)
 {
