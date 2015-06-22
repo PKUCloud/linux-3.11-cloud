@@ -2725,6 +2725,8 @@ static void __always_inline __mmu_set_AD_bit(struct kvm_vcpu *vcpu, u64 *sptep, 
 		if (*sptep & VMX_EPT_DIRTY_BIT) {
 			re_set_bit(gpa >> PAGE_SHIFT, &vcpu->dirty_bitmap);
 			//print_record("vcpu=%d, set_AD_bit, gfn=0x%llx\n", vcpu->vcpu_id, gpa >> PAGE_SHIFT);
+			print_real_log("vcpu %d dirty_bit gfn 0x%llx\n",
+				       vcpu->vcpu_id, gpa >> PAGE_SHIFT);
 			vcpu->dirty_size = (gpa >> PAGE_SHIFT) + 1;
 		}
 	}
@@ -2928,6 +2930,8 @@ static int __direct_map(struct kvm_vcpu *vcpu, gpa_t v, int write,
 				likely(!is_noslot_pfn(pfn)) && is_shadow_present_pte(*iterator.sptep)) {
 				if (!write) {
 				} else {
+					print_real_log("vcpu %d write gfn 0x%llx\n",
+						       vcpu->vcpu_id, gfn);
 //print_record("vcpu=%d, %s, 1, write=%d, sptep&PT_WRITABLE_MASK=%d, pte_access&ACC_WRITE_MASK=%d, "
 //	"sptep=0x%llx, spte=0x%llx\n",
 //	vcpu->vcpu_id, __func__, write, *iterator.sptep & PT_WRITABLE_MASK, pte_access&ACC_WRITE_MASK,

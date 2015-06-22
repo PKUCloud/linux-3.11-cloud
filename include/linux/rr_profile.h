@@ -52,7 +52,7 @@
  * have been COW. We will not withdraw the write permission and free the private
  * pages until we have to.
  */
-#define RR_HOLDING_PAGES
+//#define RR_HOLDING_PAGES
 /* Maximum length of vcpu.arch.holding_pages list */
 #define RR_HOLDING_PAGES_MAXM        512
 #define RR_HOLDING_PAGES_TARGET_NR   256
@@ -63,7 +63,7 @@
  * finished commit yet, we may read old contents. This bug is introduced in the
  * commit adding kvm.chunk_list.
  */
-#define RR_ROLLBACK_PAGES
+//#define RR_ROLLBACK_PAGES
 
 /* If defined, print_record will be disabled and print_read_log will be enabled, vice vera */
 #define PRINT_REAL_LOG
