@@ -5902,6 +5902,63 @@ extern void kvm_record_spte_set_pfn(u64 *sptep, pfn_t pfn);
 extern void kvm_record_spte_withdraw_wperm(u64 *sptep);
 extern void kvm_record_spte_check_pfn(u64 *sptep, pfn_t pfn);
 
+static bool __compare_page(void *page_a, void *page_b)
+{
+	int i;
+	char *a = page_a;
+	char *b = page_b;
+
+	for (i = 0; i < PAGE_SIZE; ++i) {
+		if (a[i] != b[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void tm_compare_private_page(struct kvm_vcpu *vcpu)
+{
+	struct kvm_private_mem_page *posa, *posb;
+	struct kvm_private_mem_page *tempa, *tempb;
+	void *pagea, *pageb;
+	struct list_head *heada, *headb;
+	int total = 0, false_write = 0;
+
+	heada = &vcpu->arch.private_pages;
+	headb = &vcpu->arch.original_pages;
+
+	for (posa = list_entry(heada->next, typeof(*posa), link),
+	     tempa = list_entry(posa->link.next, typeof(*posa), link),
+	     posb = list_entry(headb->next, typeof(*posb), link),
+	     tempb = list_entry(posb->link.next, typeof(*posb), link);
+	     (&posa->link != heada) && (&posb->link != headb);
+	     posa = tempa, tempa = list_entry(posa->link.next, typeof(*tempa),
+					      link),
+	     posb = tempb, tempb = list_entry(posb->link.next, typeof(*tempb),
+					      link)) {
+		++total;
+		if (unlikely(posa->gfn != posb->gfn)) {
+			print_real_log("error: vcpu=%d gfn mismatched\n",
+				       vcpu->vcpu_id);
+			continue;
+		} else {
+			pagea = pfn_to_kaddr(posa->private_pfn);
+			pageb = pfn_to_kaddr(posb->private_pfn);
+			if (__compare_page(pagea, pageb)) {
+				++false_write;
+				print_real_log("vcpu=%d gfn 0x%llx false write\n",
+					       vcpu->vcpu_id, posa->gfn);
+			}
+		}
+	}
+	if ((&posa->link != heada) || (&posb->link != headb)) {
+		print_real_log("error: vcpu=%d two lists mismatched\n",
+			       vcpu->vcpu_id);
+	}
+	print_real_log("vcpu=%d nr_false_write %d total_write %d\n",
+		       vcpu->vcpu_id, false_write, total);
+}
+
 #ifndef RR_HOLDING_PAGES
 /* Tamlok
  * Commit the private pages to the original ones. Called when a quantum is
@@ -5916,6 +5973,7 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 
 	print_record("vcpu=%d, memory_commit() %d pages=====================\n",
 		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
+	tm_compare_private_page(vcpu);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -5940,6 +5998,15 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		vcpu->arch.nr_private_pages--;
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.original_pages,
+				 link)
+	{
+		private = pfn_to_kaddr(private_page->private_pfn);
+		kfree(private);
+		list_del(&private_page->link);
+		kfree(private_page);
+	}
+	INIT_LIST_HEAD(&vcpu->arch.original_pages);
 }
 #else
 /* Commit one private page */
@@ -6108,6 +6175,7 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 
 	print_record("vcpu=%d, memory_rollback() %d pages=====================\n",
 		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
+	tm_compare_private_page(vcpu);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -6129,6 +6197,14 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		vcpu->arch.nr_private_pages--;
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+	list_for_each_entry_safe(private_page, temp, &vcpu->arch.original_pages,
+				 link)
+	{
+		kfree(pfn_to_kaddr(private_page->private_pfn));
+		list_del(&private_page->link);
+		kfree(private_page);
+	}
+	INIT_LIST_HEAD(&vcpu->arch.original_pages);
 }
 #else
 /* Rollback memory.
@@ -8004,11 +8080,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			if (is_early_check == 1)
 				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, COMMIT=========\n", vcpu->vcpu_id);
+			print_real_log("vcpu=%d commit\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
 			vcpu->need_check_chunk_info = 1;
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, ROLLBACK=========\n", vcpu->vcpu_id);
+			print_real_log("vcpu=%d rollback\n", vcpu->vcpu_id);
 			return KVM_RR_ROLLBACK;
 		}
 	}

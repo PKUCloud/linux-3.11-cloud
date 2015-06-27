@@ -7186,6 +7186,8 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&vcpu->arch.rollback_pages);
 	vcpu->arch.nr_rollback_pages = 0;
 #endif
+	INIT_LIST_HEAD(&vcpu->arch.original_pages);
+
 	vcpu->need_memory_commit = 0;
 	vcpu->rr_state = 0;
 	INIT_LIST_HEAD(&vcpu->arch.ept_mirror);

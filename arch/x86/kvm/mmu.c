@@ -2831,7 +2831,10 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 			   gfn_t gfn)
 {
 	void *new_page;
+	void *new_page_copy;
 	struct kvm_private_mem_page *private_mem_page;
+	/* Copy of the private_mem_page for content check */
+	struct kvm_private_mem_page *private_mem_page_copy;
 	u64 old_spte;
 
 //print_record("vcpu=%d, %s, 1, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
@@ -2846,19 +2849,42 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 		       "private_mem_page\n", vcpu->vcpu_id, __func__);
 		return;
 	}
+	private_mem_page_copy = kmalloc(sizeof(*private_mem_page_copy),
+					GFP_ATOMIC);
+	if (!private_mem_page_copy) {
+		printk(KERN_ERR "error: vcpu=%d %s fail to kmalloc for "
+		       "private_mem_page_copy\n", vcpu->vcpu_id, __func__);
+		kfree(private_mem_page);
+		return;
+	}
 	new_page = kmalloc(PAGE_SIZE, GFP_ATOMIC);
 	if (!new_page) {
 		printk(KERN_ERR "error: vcpu=%d %s fail to kmalloc for "
 		       "new_page\n", vcpu->vcpu_id, __func__);
 		kfree(private_mem_page);
+		kfree(private_mem_page_copy);
+		return;
+	}
+	new_page_copy = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+	if (!new_page_copy) {
+		printk(KERN_ERR "error: vcpu=%d %s fail to kmalloc for "
+		       "new_page_copy\n", vcpu->vcpu_id, __func__);
+		kfree(new_page);
+		kfree(private_mem_page);
+		kfree(private_mem_page_copy);
 		return;
 	}
 	private_mem_page->gfn = gfn;
+	private_mem_page_copy->gfn = gfn;
 	private_mem_page->original_pfn = pfn;
+	private_mem_page_copy->original_pfn = pfn;
 	private_mem_page->private_pfn = __pa(new_page) >> PAGE_SHIFT;
+	private_mem_page_copy->private_pfn = __pa(new_page_copy) >> PAGE_SHIFT;
 	private_mem_page->sptep = sptep;
+	private_mem_page_copy->sptep = sptep;
 //print_record("vcpu=%d, %s, 3, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	copy_page(new_page, pfn_to_kaddr(pfn));
+	copy_page(new_page_copy, pfn_to_kaddr(pfn));
 	old_spte = *sptep;
 //print_record("vcpu=%d, %s, 4, spte=0x%llx\n", vcpu->vcpu_id, __func__, *sptep);
 	kvm_record_spte_set_pfn(sptep, private_mem_page->private_pfn);
@@ -2871,6 +2897,7 @@ void kvm_record_memory_cow(struct kvm_vcpu *vcpu, u64 *sptep, pfn_t pfn,
 	/* Add it to the list */
 	list_add(&private_mem_page->link, &vcpu->arch.private_pages);
 	vcpu->arch.nr_private_pages++;
+	list_add(&private_mem_page_copy->link, &vcpu->arch.original_pages);
 }
 
 

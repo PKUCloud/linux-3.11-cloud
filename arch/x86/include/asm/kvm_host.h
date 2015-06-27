@@ -547,6 +547,7 @@ struct kvm_vcpu_arch {
 	int nr_private_pages;
 	struct list_head holding_pages; /* For pages that have been COW before */
 	int nr_holding_pages;
+	struct list_head original_pages; /* Pages that have been COW but not modified */
 #ifdef RR_ROLLBACK_PAGES
 	/* For pages that need to rollback */
 	struct list_head rollback_pages;
