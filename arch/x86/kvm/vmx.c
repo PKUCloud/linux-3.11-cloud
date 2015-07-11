@@ -5916,13 +5916,35 @@ static bool __compare_page(void *page_a, void *page_b)
 	return true;
 }
 
-void tm_compare_private_page(struct kvm_vcpu *vcpu)
+int tm_compare_private_page(struct kvm_vcpu *vcpu,
+			     struct kvm_private_mem_page *posa,
+			     struct kvm_private_mem_page *posb)
+{
+	void *pagea, *pageb;
+
+	if (unlikely(posa->gfn != posb->gfn)) {
+		print_real_log("error: vcpu=%d gfn mismatched\n",
+			       vcpu->vcpu_id);
+		return 0;
+	} else {
+		pagea = pfn_to_kaddr(posa->private_pfn);
+		pageb = pfn_to_kaddr(posb->private_pfn);
+		if (__compare_page(pagea, pageb)) {
+			/*
+			print_real_log("vcpu=%d gfn 0x%llx false write\n",
+				       vcpu->vcpu_id, posa->gfn);
+			*/
+			return 1;
+		} else
+			return 0;
+	}
+}
+
+void tm_get_dirty_bitmap_by_comparison(struct kvm_vcpu *vcpu)
 {
 	struct kvm_private_mem_page *posa, *posb;
 	struct kvm_private_mem_page *tempa, *tempb;
-	void *pagea, *pageb;
 	struct list_head *heada, *headb;
-	int total = 0, false_write = 0;
 
 	heada = &vcpu->arch.private_pages;
 	headb = &vcpu->arch.original_pages;
@@ -5936,27 +5958,31 @@ void tm_compare_private_page(struct kvm_vcpu *vcpu)
 					      link),
 	     posb = tempb, tempb = list_entry(posb->link.next, typeof(*tempb),
 					      link)) {
-		++total;
-		if (unlikely(posa->gfn != posb->gfn)) {
-			print_real_log("error: vcpu=%d gfn mismatched\n",
-				       vcpu->vcpu_id);
-			continue;
+		if (tm_compare_private_page(vcpu, posa, posb)) {
+			/* This page is not modified */
+			kvm_record_spte_set_pfn(posa->sptep, posa->original_pfn);
+			kvm_record_spte_withdraw_wperm(posa->sptep);
+			kfree(pfn_to_kaddr(posa->private_pfn));
+			list_del(&posa->link);
+			kfree(posa);
+			vcpu->arch.nr_private_pages--;
 		} else {
-			pagea = pfn_to_kaddr(posa->private_pfn);
-			pageb = pfn_to_kaddr(posb->private_pfn);
-			if (__compare_page(pagea, pageb)) {
-				++false_write;
-				print_real_log("vcpu=%d gfn 0x%llx false write\n",
-					       vcpu->vcpu_id, posa->gfn);
-			}
+			/*
+			print_real_log("vcpu=%d dirty gfn 0x%llx\n",
+				       vcpu->vcpu_id, posa->gfn);
+			*/
+			re_set_bit(posa->gfn, &vcpu->dirty_bitmap);
+			vcpu->dirty_size = posa->gfn + 1;
 		}
+
+		/* Delete the original_pages */
+		kfree(pfn_to_kaddr(posb->private_pfn));
+		list_del(&posb->link);
+		kfree(posb);
 	}
-	if ((&posa->link != heada) || (&posb->link != headb)) {
-		print_real_log("error: vcpu=%d two lists mismatched\n",
-			       vcpu->vcpu_id);
-	}
-	print_real_log("vcpu=%d nr_false_write %d total_write %d\n",
-		       vcpu->vcpu_id, false_write, total);
+	if ((&posa->link != heada) || (&posb->link != headb))
+		print_real_log("error: vcpu=%d %s two lists mismatched\n",
+			       vcpu->vcpu_id, __func__);
 }
 
 #ifndef RR_HOLDING_PAGES
@@ -5973,7 +5999,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 
 	print_record("vcpu=%d, memory_commit() %d pages=====================\n",
 		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
-	tm_compare_private_page(vcpu);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -5998,6 +6023,8 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		vcpu->arch.nr_private_pages--;
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
+
+	/* For tm_commit_memory_again() */
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.original_pages,
 				 link)
 	{
@@ -6006,7 +6033,6 @@ void tm_memory_commit(struct kvm_vcpu *vcpu)
 		list_del(&private_page->link);
 		kfree(private_page);
 	}
-	INIT_LIST_HEAD(&vcpu->arch.original_pages);
 }
 #else
 /* Commit one private page */
@@ -6175,7 +6201,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 
 	print_record("vcpu=%d, memory_rollback() %d pages=====================\n",
 		     vcpu->vcpu_id, vcpu->arch.nr_private_pages);
-	tm_compare_private_page(vcpu);
 	list_for_each_entry_safe(private_page, temp, &vcpu->arch.private_pages,
 		link)
 	{
@@ -6197,14 +6222,6 @@ void tm_memory_rollback(struct kvm_vcpu *vcpu)
 		vcpu->arch.nr_private_pages--;
 	}
 	INIT_LIST_HEAD(&vcpu->arch.private_pages);
-	list_for_each_entry_safe(private_page, temp, &vcpu->arch.original_pages,
-				 link)
-	{
-		kfree(pfn_to_kaddr(private_page->private_pfn));
-		list_del(&private_page->link);
-		kfree(private_page);
-	}
-	INIT_LIST_HEAD(&vcpu->arch.original_pages);
 }
 #else
 /* Rollback memory.
@@ -6516,6 +6533,8 @@ int tm_unsync_commit(struct kvm_vcpu *vcpu, int kick_time)
 			tm_walk_mmu(vcpu, PT_PAGE_TABLE_LEVEL);
 		kvm->timestamp ++;
 		PROFILE_END(walk_mmu_time);
+
+		tm_get_dirty_bitmap_by_comparison(vcpu);
 
 		if (!vcpu->exclusive_commit && atomic_read(&kvm->tm_normal_commit) < 1) {
 			PROFILE_BEGIN(exclusive_time);
@@ -8080,13 +8099,13 @@ static int vmx_check_rr_commit(struct kvm_vcpu *vcpu)
 			if (is_early_check == 1)
 				print_record("vcpu=%d, is_early_check and KVM_RR_COMMIT\n", vcpu->vcpu_id);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, COMMIT=========\n", vcpu->vcpu_id);
-			print_real_log("vcpu=%d commit\n", vcpu->vcpu_id);
+			// print_real_log("vcpu=%d commit\n", vcpu->vcpu_id);
 			return KVM_RR_COMMIT;
 		} else {
 			vcpu->need_check_chunk_info = 1;
 			//printk(KERN_ERR "error: %s need to rollback\n", __func__);
 			//print_record("vcpu=%d, PROFILE_COW, END_OF_CHUNK, ROLLBACK=========\n", vcpu->vcpu_id);
-			print_real_log("vcpu=%d rollback\n", vcpu->vcpu_id);
+			//print_real_log("vcpu=%d rollback\n", vcpu->vcpu_id);
 			return KVM_RR_ROLLBACK;
 		}
 	}
