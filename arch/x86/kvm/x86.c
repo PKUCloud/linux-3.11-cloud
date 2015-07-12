@@ -7187,6 +7187,7 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 	vcpu->arch.nr_rollback_pages = 0;
 #endif
 	INIT_LIST_HEAD(&vcpu->arch.original_pages);
+	vcpu->arch.hash_tfm = NULL;
 
 	vcpu->need_memory_commit = 0;
 	vcpu->rr_state = 0;

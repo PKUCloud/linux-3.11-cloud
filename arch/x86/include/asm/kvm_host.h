@@ -24,6 +24,7 @@
 #include <linux/perf_event.h>
 #include <linux/pvclock_gtod.h>
 #include <linux/clocksource.h>
+#include <linux/crypto.h>
 
 #include <asm/pvclock-abi.h>
 #include <asm/desc.h>
@@ -349,6 +350,7 @@ struct kvm_private_mem_page {
 	pfn_t original_pfn;
 	pfn_t private_pfn;
 	u64 *sptep;	/*Pointer of the spte that references this pfn */
+	char hash[RR_HASH_LEN];
 };
 
 /* Record spte, including gpa, spte and the content of the page */
@@ -548,6 +550,7 @@ struct kvm_vcpu_arch {
 	struct list_head holding_pages; /* For pages that have been COW before */
 	int nr_holding_pages;
 	struct list_head original_pages; /* Pages that have been COW but not modified */
+	struct crypto_hash *hash_tfm;
 #ifdef RR_ROLLBACK_PAGES
 	/* For pages that need to rollback */
 	struct list_head rollback_pages;

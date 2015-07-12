@@ -65,6 +65,11 @@
  */
 //#define RR_ROLLBACK_PAGES
 
+#define RR_HASH_CHECK
+
+#define RR_HASH_ALGO				"sha1"
+#define RR_HASH_LEN					20
+
 /* If defined, print_record will be disabled and print_read_log will be enabled, vice vera */
 #define PRINT_REAL_LOG
 

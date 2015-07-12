@@ -5791,6 +5791,11 @@ void tm_disable(struct kvm_vcpu *vcpu)
 	re_bitmap_destroy(&vcpu->dirty_bitmap);
 	re_bitmap_destroy(&vcpu->DMA_access_bitmap);
 
+	if (vcpu->arch.hash_tfm) {
+		crypto_free_hash(vcpu->arch.hash_tfm);
+		vcpu->arch.hash_tfm = NULL;
+	}
+
 #ifdef RR_BEBACKOFF
 	vcpu->nr_commit = 0;
 #endif
@@ -5916,11 +5921,18 @@ static bool __compare_page(void *page_a, void *page_b)
 	return true;
 }
 
+extern int tm_caculate_hash(struct kvm_vcpu *vcpu, char *dst, char *src,
+			   int len);
+
 int tm_compare_private_page(struct kvm_vcpu *vcpu,
 			     struct kvm_private_mem_page *posa,
 			     struct kvm_private_mem_page *posb)
 {
 	void *pagea, *pageb;
+	char md5[RR_HASH_LEN];
+	char temp[RR_HASH_LEN];
+	bool same_md5 = false;
+	int ret = 0;
 
 	if (unlikely(posa->gfn != posb->gfn)) {
 		print_real_log("error: vcpu=%d gfn mismatched\n",
@@ -5929,15 +5941,28 @@ int tm_compare_private_page(struct kvm_vcpu *vcpu,
 	} else {
 		pagea = pfn_to_kaddr(posa->private_pfn);
 		pageb = pfn_to_kaddr(posb->private_pfn);
+
+		tm_caculate_hash(vcpu, md5, pagea, PAGE_SIZE);
+		tm_caculate_hash(vcpu, temp, pageb, PAGE_SIZE);
+		same_md5 = !strncmp(md5, temp, RR_HASH_LEN);
+
 		if (__compare_page(pagea, pageb)) {
-			/*
 			print_real_log("vcpu=%d gfn 0x%llx false write\n",
 				       vcpu->vcpu_id, posa->gfn);
-			*/
-			return 1;
-		} else
-			return 0;
+			ret = 1;
+			if (!same_md5) {
+				print_real_log("error: vcpu=%d content is the "
+					       "same but hash is not\n",
+					       vcpu->vcpu_id);
+			}
+		} else {
+			if (same_md5)
+				print_real_log("error: vcpu=%d hash is the same "
+					       "but content is not\n",
+					       vcpu->vcpu_id);
+		}
 	}
+	return ret;
 }
 
 void tm_get_dirty_bitmap_by_comparison(struct kvm_vcpu *vcpu)
