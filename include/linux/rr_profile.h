@@ -55,7 +55,7 @@
 #define RR_HOLDING_PAGES
 /* Maximum length of vcpu.arch.holding_pages list */
 #define RR_HOLDING_PAGES_MAXM        512
-#define RR_HOLDING_PAGES_TARGET_NR   256
+#define RR_HOLDING_PAGES_TARGET_NR   512
 
 /* If defined, we use a separate list to hold pages need to rollback and before
  * entering guest, we copy the new content of those pages.
